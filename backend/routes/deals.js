@@ -157,7 +157,8 @@ router.delete('/:id', requirePermission('canDeleteDeals'), (req, res) => {
 // ── Утилиты ──────────────────────────────────────────────────────────────
 
 /**
- * Убирает бухгалтерские поля для ролей без соответствующего права.
+ * Скрывает бухгалтерские поля для ролей, которым они недоступны.
+ * Менеджер по продажам не видит бухгалтерские данные; все остальные роли видят их.
  * @param {object} deal
  * @param {string} role
  * @returns {object}
@@ -165,8 +166,8 @@ router.delete('/:id', requirePermission('canDeleteDeals'), (req, res) => {
 function sanitizeDeal(deal, role) {
   const result = { ...deal };
 
-  // Бухгалтерские поля скрываем для менеджера по продажам
-  if (!canEditAccountingFields(role) && role !== 'accounting' && role !== 'admin' && role !== 'viewer') {
+  // Бухгалтерские поля скрываем только для менеджера по продажам
+  if (role === 'sales') {
     ACCOUNTING_FIELDS.forEach((f) => delete result[f]);
   }
 

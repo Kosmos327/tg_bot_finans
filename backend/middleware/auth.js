@@ -4,7 +4,7 @@ const { ROLES, getPermissionsForRole } = require('../permissions');
 
 /**
  * Список демо-пользователей с назначенными ролями.
- * В production ролі хранятся в базе данных.
+ * В production роли хранятся в базе данных.
  */
 const DEMO_USERS = {
   user_admin: { id: 'user_admin', name: 'Иван Администратов', role: ROLES.ADMIN },
