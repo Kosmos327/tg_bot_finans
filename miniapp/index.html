@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Финансовая система</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+
+<!-- =========================================================
+     LOADING SCREEN
+     ========================================================= -->
+<div id="loading-screen" class="loading-screen">
+  <div class="loading-spinner"></div>
+  <p class="loading-text">Загрузка...</p>
+</div>
+
+<!-- =========================================================
+     NO ACCESS SCREEN
+     ========================================================= -->
+<div id="no-access-screen" class="no-access-screen hidden">
+  <div class="no-access-icon">🔒</div>
+  <h2>Нет доступа</h2>
+  <p>Ваш аккаунт не настроен в системе.<br>Обратитесь к администратору.</p>
+</div>
+
+<!-- =========================================================
+     MAIN APP CONTAINER
+     ========================================================= -->
+<div id="app" class="hidden">
+
+  <!-- ── Top Header ─────────────────────────────────── -->
+  <header id="app-header" class="app-header">
+    <div class="header-left">
+      <div class="avatar" id="user-avatar">?</div>
+      <div class="header-info">
+        <div class="user-name" id="user-name">Загрузка…</div>
+        <div class="role-badge" id="role-badge">—</div>
+      </div>
+    </div>
+    <button class="icon-btn" id="refresh-btn" title="Обновить">🔄</button>
+  </header>
+
+  <!-- ── KPI Cards Row ──────────────────────────────── -->
+  <section class="kpi-section" id="kpi-section"></section>
+
+  <!-- ── Quick Actions ──────────────────────────────── -->
+  <section class="actions-section" id="actions-section"></section>
+
+  <!-- ── Tab Bar ────────────────────────────────────── -->
+  <div class="tab-bar" id="tab-bar"></div>
+
+  <!-- ── Tab Content ────────────────────────────────── -->
+  <main class="tab-content" id="tab-content"></main>
+
+</div>
+
+<!-- =========================================================
+     DEAL DETAIL MODAL
+     ========================================================= -->
+<div id="deal-modal" class="modal hidden">
+  <div class="modal-backdrop" id="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <h3 id="modal-title">Сделка</h3>
+      <button class="icon-btn" id="modal-close">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<!-- =========================================================
+     TOAST
+     ========================================================= -->
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
