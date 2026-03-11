@@ -1,21 +1,16 @@
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    telegram_bot_token: str = ""
+    webapp_url: str = ""
+    google_service_account_file: str = "service_account.json"
+    google_sheets_spreadsheet_id: str = ""
+    api_base_url: str = "http://localhost:8000"
 
-    # Telegram
-    bot_token: str
-    mini_app_url: str
-
-    # Backend
-    backend_url: str = "http://localhost:8000"
-    secret_key: str = Field(default=..., description="Secret key for signing — must be set in .env")
-
-    # Google Sheets
-    google_credentials_file: str = "credentials.json"
-    spreadsheet_name: str = "Финанс.xlsx"
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
 
 settings = Settings()

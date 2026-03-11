@@ -7,29 +7,40 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-.eggs/
 *.egg
-*.whl
+.eggs/
 
 # Virtual environments
-venv/
 .venv/
+venv/
 env/
 .env
 
-# Keep .env.example but not the real .env
-# (use .env.example as template)
-
-# Google service account credentials — never commit
+# Credentials & secrets (DO NOT commit)
+service_account.json
+*.json.key
 credentials.json
-service_account*.json
 
-# IDE / OS
+# IDE
 .idea/
 .vscode/
-*.DS_Store
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
 
 # Logs
 *.log
 logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Distribution
+dist/
+build/

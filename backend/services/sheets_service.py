@@ -1,13 +1,7 @@
-"""
-Google Sheets service.
-
-Handles all interactions with the "Финанс.xlsx" Google Spreadsheet
-using the gspread library authenticated via a service account.
-"""
-
 import logging
-from datetime import datetime, timezone
-from typing import Any
+import threading
+from datetime import datetime
+from typing import Any, List, Optional
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -16,183 +10,320 @@ from config.config import settings
 
 logger = logging.getLogger(__name__)
 
-# OAuth scopes required for read/write access to Sheets
-_SCOPES = [
+# Lock to prevent race conditions in sequential deal ID generation
+_deal_id_lock = threading.Lock()
+
+SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
-# Sheet names
 SHEET_DEALS = "Учёт сделок"
 SHEET_SETTINGS = "Настройки"
-SHEET_LOG = "Журнал действий"
+SHEET_JOURNAL = "Журнал действий"
 
-# Column indices (1-based) for "Учёт сделок"
-COL_ID = 1           # A – ID сделки
-COL_STATUS = 2       # B – Статус сделки
-COL_DIRECTION = 3    # C – Направление бизнеса
-COL_CLIENT = 4       # D – Клиент
-COL_MANAGER = 5      # E – Менеджер
-COL_AMOUNT = 6       # F – Начислено с НДС
-COL_VAT = 7          # G – Наличие НДС
-COL_PAID = 8         # H – Оплачено
-COL_DATE_START = 9   # I – Дата начала проекта
-COL_DATE_END = 10    # J – Дата окончания проекта
-COL_DATE_ACT = 11    # K – Дата выставления акта
-COL_VAR_EXP1 = 12   # L – Переменный расход 1
-COL_VAR_EXP2 = 13   # M – Переменный расход 2
-COL_BONUS_PCT = 14  # N – Бонус менеджера %
-COL_BONUS_PAID = 15 # O – Бонус менеджера выплачено
-COL_OVERHEAD = 16   # P – Общепроизводственный расход
-COL_SOURCE = 17     # Q – Источник
-COL_DOC_LINK = 18   # R – Документ/ссылка
-COL_COMMENT = 19    # S – Комментарий
+# Row 1 is header in "Учёт сделок"
+DEALS_HEADER_ROW = 1
+
+# Column index mapping (1-based) for "Учёт сделок"
+COL_DEAL_ID = 1        # A
+COL_STATUS = 2         # B
+COL_DIRECTION = 3      # C
+COL_CLIENT = 4         # D
+COL_MANAGER = 5        # E
+COL_CHARGED_VAT = 6    # F
+COL_VAT_TYPE = 7       # G
+COL_PAID = 8           # H
+COL_START_DATE = 9     # I
+COL_END_DATE = 10      # J
+COL_ACT_DATE = 11      # K
+COL_VAR_EXP1 = 12      # L
+COL_VAR_EXP2 = 13      # M
+COL_BONUS_PCT = 14     # N
+COL_BONUS_PAID = 15    # O
+COL_GENERAL_EXP = 16   # P
+COL_SOURCE = 17        # Q
+COL_DOC_LINK = 18      # R
+COL_COMMENT = 19       # S
 
 
 def _get_client() -> gspread.Client:
-    """Create an authenticated gspread client using a service account."""
     creds = Credentials.from_service_account_file(
-        settings.google_credentials_file, scopes=_SCOPES
+        settings.google_service_account_file,
+        scopes=SCOPES,
     )
     return gspread.authorize(creds)
 
 
-def _open_sheet(client: gspread.Client, sheet_name: str) -> gspread.Worksheet:
-    spreadsheet = client.open(settings.spreadsheet_name)
-    return spreadsheet.worksheet(sheet_name)
-
-
-def _next_deal_id(ws: gspread.Worksheet) -> str:
-    """
-    Determine the next sequential deal ID by counting existing data rows.
-    Returns a string like 'DEAL-000001'.
-    """
-    all_values = ws.get_all_values()
-    # Row 0 is the header; data starts from row 1
-    data_rows = len(all_values) - 1 if len(all_values) > 1 else 0
-    next_number = data_rows + 1
-    return f"DEAL-{next_number:06d}"
-
-
-def create_deal(deal_data: dict[str, Any]) -> str:
-    """
-    Append a new deal row to the 'Учёт сделок' sheet and log the action.
-
-    Args:
-        deal_data: Dict with deal fields.
-
-    Returns:
-        The generated deal ID string.
-    """
+def _get_spreadsheet() -> gspread.Spreadsheet:
     client = _get_client()
-    ws = _open_sheet(client, SHEET_DEALS)
-
-    deal_id = _next_deal_id(ws)
-
-    row = [""] * 19
-    row[COL_ID - 1] = deal_id
-    row[COL_STATUS - 1] = deal_data.get("status", "")
-    row[COL_DIRECTION - 1] = deal_data.get("business_direction", "")
-    row[COL_CLIENT - 1] = deal_data.get("client", "")
-    row[COL_MANAGER - 1] = deal_data.get("manager", "")
-    row[COL_AMOUNT - 1] = deal_data.get("amount_with_vat", "")
-    row[COL_VAT - 1] = deal_data.get("vat_type", "")
-    row[COL_PAID - 1] = ""
-    row[COL_DATE_START - 1] = deal_data.get("start_date", "")
-    row[COL_DATE_END - 1] = deal_data.get("end_date", "")
-    row[COL_DATE_ACT - 1] = ""
-    row[COL_VAR_EXP1 - 1] = ""
-    row[COL_VAR_EXP2 - 1] = ""
-    row[COL_BONUS_PCT - 1] = ""
-    row[COL_BONUS_PAID - 1] = ""
-    row[COL_OVERHEAD - 1] = ""
-    row[COL_SOURCE - 1] = deal_data.get("source", "")
-    row[COL_DOC_LINK - 1] = deal_data.get("document_link", "")
-    row[COL_COMMENT - 1] = deal_data.get("comment", "")
-
-    ws.append_row(row, value_input_option="USER_ENTERED")
-    logger.info("Deal created: %s", deal_id)
-
-    # Write action log
-    _log_action(
-        client=client,
-        telegram_user_id=deal_data.get("telegram_user_id", ""),
-        action="create_deal",
-        deal_id=deal_id,
-    )
-
-    return deal_id
+    return client.open_by_key(settings.google_sheets_spreadsheet_id)
 
 
-def get_deals_by_manager(manager_name: str) -> list[dict[str, Any]]:
+def load_settings() -> dict:
+    """Load reference data from 'Настройки' sheet."""
+    try:
+        spreadsheet = _get_spreadsheet()
+        ws = spreadsheet.worksheet(SHEET_SETTINGS)
+        all_values = ws.get_all_values()
+
+        settings_data: dict = {
+            "statuses": [],
+            "business_directions": [],
+            "clients": [],
+            "managers": [],
+            "vat_types": [],
+            "sources": [],
+        }
+
+        # Parse settings sheet: column A = key, column B+ = values
+        for row in all_values:
+            if not row or not row[0]:
+                continue
+            key = row[0].strip().lower()
+            values = [v.strip() for v in row[1:] if v.strip()]
+
+            if "статус" in key:
+                settings_data["statuses"] = values
+            elif "направлени" in key:
+                settings_data["business_directions"] = values
+            elif "клиент" in key:
+                settings_data["clients"] = values
+            elif "менеджер" in key:
+                settings_data["managers"] = values
+            elif "ндс" in key:
+                settings_data["vat_types"] = values
+            elif "источник" in key:
+                settings_data["sources"] = values
+
+        # Provide defaults if sheet is empty or not configured
+        if not settings_data["statuses"]:
+            settings_data["statuses"] = [
+                "Новая", "В работе", "Завершена", "Отменена", "Приостановлена"
+            ]
+        if not settings_data["business_directions"]:
+            settings_data["business_directions"] = [
+                "Разработка", "Консалтинг", "Дизайн", "Маркетинг", "Другое"
+            ]
+        if not settings_data["vat_types"]:
+            settings_data["vat_types"] = ["С НДС", "Без НДС"]
+        if not settings_data["sources"]:
+            settings_data["sources"] = [
+                "Рекомендация", "Сайт", "Реклама", "Холодный звонок", "Другое"
+            ]
+
+        return settings_data
+    except Exception as exc:
+        logger.error("Failed to load settings from Google Sheets: %s", exc)
+        # Return defaults on error
+        return {
+            "statuses": ["Новая", "В работе", "Завершена", "Отменена"],
+            "business_directions": ["Разработка", "Консалтинг", "Дизайн", "Другое"],
+            "clients": [],
+            "managers": [],
+            "vat_types": ["С НДС", "Без НДС"],
+            "sources": ["Рекомендация", "Сайт", "Реклама", "Другое"],
+        }
+
+
+def _get_next_deal_id(ws: gspread.Worksheet) -> str:
+    """Generate the next sequential deal ID."""
+    all_ids = ws.col_values(COL_DEAL_ID)
+    max_num = 0
+    for cell_val in all_ids[1:]:  # skip header
+        if cell_val and cell_val.startswith("DEAL-"):
+            try:
+                num = int(cell_val.split("-")[1])
+                if num > max_num:
+                    max_num = num
+            except (IndexError, ValueError):
+                pass
+    return f"DEAL-{max_num + 1:06d}"
+
+
+def create_deal(deal_data: dict) -> str:
+    """Append a new deal row to 'Учёт сделок'. Returns the new deal_id."""
+    with _deal_id_lock:
+        spreadsheet = _get_spreadsheet()
+        ws = spreadsheet.worksheet(SHEET_DEALS)
+
+        deal_id = _get_next_deal_id(ws)
+
+        row = [
+            deal_id,
+            deal_data.get("status", ""),
+            deal_data.get("business_direction", ""),
+            deal_data.get("client", ""),
+            deal_data.get("manager", ""),
+            deal_data.get("charged_with_vat", ""),
+            deal_data.get("vat_type", ""),
+            deal_data.get("paid", ""),
+            deal_data.get("project_start_date", ""),
+            deal_data.get("project_end_date", ""),
+            deal_data.get("act_date", ""),
+            deal_data.get("variable_expense_1", ""),
+            deal_data.get("variable_expense_2", ""),
+            deal_data.get("manager_bonus_percent", ""),
+            deal_data.get("manager_bonus_paid", ""),
+            deal_data.get("general_production_expense", ""),
+            deal_data.get("source", ""),
+            deal_data.get("document_link", ""),
+            deal_data.get("comment", ""),
+        ]
+
+        ws.append_row(row, value_input_option="USER_ENTERED")
+        logger.info("Created deal %s", deal_id)
+        return deal_id
+
+
+def get_user_deals(manager_name: Optional[str] = None) -> List[dict]:
     """
-    Return all deals where the manager column matches `manager_name`.
+    Return deals from the sheet. Optionally filter by manager name.
+    Returns list of deal dicts.
     """
-    client = _get_client()
-    ws = _open_sheet(client, SHEET_DEALS)
+    spreadsheet = _get_spreadsheet()
+    ws = spreadsheet.worksheet(SHEET_DEALS)
     all_rows = ws.get_all_values()
 
-    if not all_rows:
+    if len(all_rows) <= 1:
         return []
 
-    headers = all_rows[0]
-    deals: list[dict[str, Any]] = []
-
-    for row in all_rows[1:]:
-        # Pad short rows
-        while len(row) < len(headers):
+    deals = []
+    for row in all_rows[1:]:  # skip header
+        # Pad row to 19 columns
+        while len(row) < 19:
             row.append("")
-        row_dict = dict(zip(headers, row))
-        if row_dict.get("Менеджер", "") == manager_name:
-            deals.append(row_dict)
+
+        deal = _row_to_dict(row)
+        if not deal["deal_id"]:
+            continue
+        if manager_name and deal["manager"] != manager_name:
+            continue
+        deals.append(deal)
 
     return deals
 
 
-def get_settings() -> dict[str, list[str]]:
-    """
-    Read reference data from the 'Настройки' sheet.
-
-    Expected layout: each column has a header in row 1 and values below.
-    """
-    client = _get_client()
-    ws = _open_sheet(client, SHEET_SETTINGS)
+def get_deal_by_id(deal_id: str) -> Optional[dict]:
+    """Return a single deal dict by deal_id, or None if not found."""
+    spreadsheet = _get_spreadsheet()
+    ws = spreadsheet.worksheet(SHEET_DEALS)
     all_rows = ws.get_all_values()
 
-    if not all_rows:
-        return {}
-
-    headers = all_rows[0]
-    result: dict[str, list[str]] = {h: [] for h in headers if h}
-
     for row in all_rows[1:]:
-        for idx, header in enumerate(headers):
-            if not header:
-                continue
-            value = row[idx] if idx < len(row) else ""
-            if value:
-                result[header].append(value)
-
-    return result
+        while len(row) < 19:
+            row.append("")
+        if row[0] == deal_id:
+            return _row_to_dict(row)
+    return None
 
 
-def _log_action(
-    client: gspread.Client,
-    telegram_user_id: int | str,
+def update_deal(deal_id: str, update_data: dict) -> bool:
+    """
+    Update an existing deal row. Returns True on success.
+    """
+    spreadsheet = _get_spreadsheet()
+    ws = spreadsheet.worksheet(SHEET_DEALS)
+    all_rows = ws.get_all_values()
+
+    for idx, row in enumerate(all_rows):
+        if row and row[0] == deal_id:
+            row_number = idx + 1  # 1-based
+            current = _row_to_dict(row)
+            # Merge updates
+            merged = {**current, **{k: v for k, v in update_data.items() if v is not None}}
+            new_row = _dict_to_row(merged)
+            ws.update(
+                f"A{row_number}:S{row_number}",
+                [new_row],
+                value_input_option="USER_ENTERED",
+            )
+            logger.info("Updated deal %s", deal_id)
+            return True
+    return False
+
+
+def append_journal_entry(
+    telegram_user_id: str,
     action: str,
-    deal_id: str,
+    deal_id: str = "",
+    payload_summary: str = "",
 ) -> None:
-    """Append a row to the 'Журнал действий' sheet."""
+    """Append a log entry to 'Журнал действий'."""
     try:
-        ws = _open_sheet(client, SHEET_LOG)
+        spreadsheet = _get_spreadsheet()
+        ws = spreadsheet.worksheet(SHEET_JOURNAL)
+        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         ws.append_row(
-            [
-                datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                str(telegram_user_id),
-                action,
-                deal_id,
-            ],
+            [timestamp, telegram_user_id, action, deal_id, payload_summary],
             value_input_option="USER_ENTERED",
         )
-    except Exception:
-        logger.exception("Failed to write action log for deal %s", deal_id)
+    except Exception as exc:
+        logger.warning("Failed to append journal entry: %s", exc)
+
+
+def _row_to_dict(row: list) -> dict:
+    def _safe(idx: int) -> str:
+        try:
+            return row[idx]
+        except IndexError:
+            return ""
+
+    def _safe_float(idx: int) -> Optional[float]:
+        val = _safe(idx)
+        if val == "":
+            return None
+        try:
+            return float(val)
+        except ValueError:
+            return None
+
+    return {
+        "deal_id": _safe(0),
+        "status": _safe(1),
+        "business_direction": _safe(2),
+        "client": _safe(3),
+        "manager": _safe(4),
+        "charged_with_vat": _safe_float(5),
+        "vat_type": _safe(6),
+        "paid": _safe_float(7),
+        "project_start_date": _safe(8),
+        "project_end_date": _safe(9),
+        "act_date": _safe(10),
+        "variable_expense_1": _safe_float(11),
+        "variable_expense_2": _safe_float(12),
+        "manager_bonus_percent": _safe_float(13),
+        "manager_bonus_paid": _safe_float(14),
+        "general_production_expense": _safe_float(15),
+        "source": _safe(16),
+        "document_link": _safe(17),
+        "comment": _safe(18),
+    }
+
+
+def _dict_to_row(deal: dict) -> list:
+    def _v(key: str) -> Any:
+        val = deal.get(key, "")
+        return val if val is not None else ""
+
+    return [
+        _v("deal_id"),
+        _v("status"),
+        _v("business_direction"),
+        _v("client"),
+        _v("manager"),
+        _v("charged_with_vat"),
+        _v("vat_type"),
+        _v("paid"),
+        _v("project_start_date"),
+        _v("project_end_date"),
+        _v("act_date"),
+        _v("variable_expense_1"),
+        _v("variable_expense_2"),
+        _v("manager_bonus_percent"),
+        _v("manager_bonus_paid"),
+        _v("general_production_expense"),
+        _v("source"),
+        _v("document_link"),
+        _v("comment"),
+    ]

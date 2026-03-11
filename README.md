@@ -1,125 +1,134 @@
-# tg_bot_finans
+# 💼 Финансовая система — Telegram Mini App
 
-Production-ready **Telegram Mini App** integrated with **Google Sheets** for financial deal tracking.
+Полноценная система учёта сделок на базе Telegram Mini App с интеграцией Google Sheets.
 
-## Architecture
-
-```
-User → Telegram Bot → Mini App → FastAPI Backend → Google Sheets
-```
-
-## Project Structure
+## 🏗️ Архитектура
 
 ```
 project/
-├── bot/
-│   ├── bot.py          # aiogram 3.x entry point
-│   ├── handlers.py     # /start command handler
-│   └── keyboards.py    # WebApp keyboard button
-├── backend/
-│   ├── main.py         # FastAPI application
-│   ├── routers/
-│   │   ├── deals.py    # POST /deal/create, GET /deals/user
-│   │   └── settings.py # GET /settings
-│   └── services/
-│       ├── sheets_service.py  # gspread Google Sheets integration
-│       └── auth_service.py    # Telegram initData HMAC validation
-├── miniapp/
-│   ├── index.html      # Mini App shell
-│   ├── app.js          # Vanilla JS logic
-│   └── styles.css      # Telegram-themed styles
-├── config/
-│   └── config.py       # pydantic-settings configuration
-├── .env.example        # Environment variables template
-└── requirements.txt
+  bot/              — Telegram бот (aiogram 3.x)
+  backend/          — FastAPI REST API
+    routers/        — Эндпоинты (deals, settings, auth)
+    services/       — Бизнес-логика (Google Sheets, auth)
+    models/         — Pydantic схемы
+  miniapp/          — Фронтенд Mini App (HTML/CSS/JS)
+  config/           — Конфигурация приложения
 ```
 
-## Quick Start
+## 🚀 Установка и запуск
 
-### 1. Install dependencies
+### 1. Клонирование и зависимости
 
 ```bash
-python -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
+git clone <repo>
+cd tg_bot_finans
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment
+### 2. Настройка переменных окружения
 
 ```bash
 cp .env.example .env
-# Edit .env with your credentials
 ```
 
-| Variable | Description |
-|---|---|
-| `BOT_TOKEN` | Telegram Bot API token from @BotFather |
-| `MINI_APP_URL` | Public HTTPS URL of `miniapp/index.html` |
-| `BACKEND_URL` | Public HTTPS URL of the FastAPI server |
-| `GOOGLE_CREDENTIALS_FILE` | Path to your service account JSON key |
-| `SPREADSHEET_NAME` | Google Sheets file name (default: `Финанс.xlsx`) |
+Заполните `.env`:
 
-### 3. Set up Google Sheets
+```env
+BOT_TOKEN=ваш_токен_бота
+WEBAPP_URL=https://ваш-домен.com/miniapp
+GOOGLE_SERVICE_ACCOUNT_FILE=service_account.json
+GOOGLE_SHEETS_SPREADSHEET_ID=id_вашей_таблицы
+TELEGRAM_BOT_TOKEN=ваш_токен_бота
+API_BASE_URL=http://localhost:8000
+```
 
-1. Create a Google Cloud project and enable the **Google Sheets API** and **Google Drive API**.
-2. Create a **Service Account** and download the JSON key as `credentials.json`.
-3. Share your spreadsheet (`Финанс.xlsx`) with the service account email.
-4. Ensure the spreadsheet has sheets named:
-   - `Учёт сделок` — deals data (columns A–S)
-   - `Настройки` — reference data with headers: `Статусы`, `Направления бизнеса`, `Клиенты`, `Менеджеры`, `Типы НДС`
-   - `Журнал действий` — action log
+### 3. Подключение Google Sheets
 
-### 4. Run the backend
+#### Создание сервисного аккаунта
+
+1. Откройте [Google Cloud Console](https://console.cloud.google.com/)
+2. Создайте новый проект или выберите существующий
+3. Включите **Google Sheets API** и **Google Drive API**
+4. Создайте сервисный аккаунт: `IAM & Admin → Service Accounts → Create`
+5. Скачайте ключ в формате JSON и сохраните как `service_account.json` в корень проекта
+6. Скопируйте email сервисного аккаунта (вида `xxx@project.iam.gserviceaccount.com`)
+
+#### Настройка таблицы Google Sheets
+
+1. Создайте таблицу Google Sheets
+2. Откройте доступ для сервисного аккаунта: `Поделиться → вставьте email → Редактор`
+3. Скопируйте ID таблицы из URL: `https://docs.google.com/spreadsheets/d/**ВАШ_ID**/edit`
+4. Создайте листы:
+   - **"Учёт сделок"** — с заголовками в строке 1:
+     `ID сделки | Статус сделки | Направление бизнеса | Клиент | Менеджер | Начислено с НДС | Наличие НДС | Оплачено | Дата начала проекта | Дата окончания проекта | Дата выставления акта | Переменный расход 1 | Переменный расход 2 | Бонус менеджера % | Бонус менеджера выплачено | Общепроизводственный расход | Источник | Документ/ссылка | Комментарий`
+   - **"Настройки"** — справочники в формате:
+     ```
+     Статусы сделок | Новая | В работе | Завершена | Отменена
+     Направления    | Разработка | Консалтинг | Дизайн
+     Клиенты        | ООО Ромашка | ИП Иванов
+     Менеджеры      | Иванов А. | Петров Б.
+     Типы НДС       | С НДС | Без НДС
+     Источники      | Рекомендация | Сайт | Реклама
+     ```
+   - **"Журнал действий"** — пустой лист (заполняется автоматически)
+
+### 4. Запуск Backend API
 
 ```bash
 uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-The Mini App static files are served at `/miniapp/index.html`.
+Документация API доступна по адресу: `http://localhost:8000/docs`
 
-### 5. Run the bot
+### 5. Запуск Telegram бота
 
 ```bash
 python -m bot.bot
 ```
 
-## API Endpoints
+### 6. Настройка Telegram Mini App
 
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| POST | `/deal/create` | Telegram initData | Create a new deal |
-| GET | `/deals/user?manager=` | Telegram initData | Get deals by manager |
-| GET | `/settings` | None | Load reference data |
-| GET | `/health` | None | Health check |
-| GET | `/miniapp/*` | None | Serve Mini App static files |
+1. Откройте [@BotFather](https://t.me/BotFather) в Telegram
+2. Выберите вашего бота → `Bot Settings → Menu Button → Configure menu button`
+3. Установите URL: `https://ваш-домен.com/miniapp/index.html`
+4. Либо установите через команду `/newapp`
 
-## Security
+> **Важно**: Mini App URL должен быть HTTPS. Для разработки используйте [ngrok](https://ngrok.com/) или аналоги.
 
-- All deal endpoints require a valid Telegram `initData` header (`X-Init-Data`).
-- Validation uses **HMAC-SHA256** per the [Telegram Web Apps docs](https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app).
-- Invalid or missing signatures return `HTTP 401`.
+#### Настройка для разработки с ngrok:
 
-## Google Sheets Column Mapping (`Учёт сделок`)
+```bash
+ngrok http 8000
+# Скопируйте HTTPS URL и установите в WEBAPP_URL
+```
 
-| Column | Field |
-|---|---|
-| A | ID сделки |
-| B | Статус сделки |
-| C | Направление бизнеса |
-| D | Клиент |
-| E | Менеджер |
-| F | Начислено с НДС |
-| G | Наличие НДС |
-| H | Оплачено |
-| I | Дата начала проекта |
-| J | Дата окончания проекта |
-| K | Дата выставления акта |
-| L | Переменный расход 1 |
-| M | Переменный расход 2 |
-| N | Бонус менеджера % |
-| O | Бонус менеджера выплачено |
-| P | Общепроизводственный расход |
-| Q | Источник |
-| R | Документ/ссылка |
-| S | Комментарий |
+## 🔌 API Эндпоинты
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/health` | Проверка состояния API |
+| GET | `/settings` | Загрузка справочников |
+| POST | `/deal/create` | Создание новой сделки |
+| GET | `/deal/user` | Список сделок (с фильтром по менеджеру) |
+| GET | `/deal/{deal_id}` | Получение сделки по ID |
+| PUT | `/deal/{deal_id}` | Обновление сделки |
+| POST | `/auth/validate` | Валидация Telegram initData |
+
+## 📱 Возможности Mini App
+
+- **🆕 Новая сделка** — форма создания сделки с 5 разделами
+- **📂 Мои сделки** — список сделок с фильтрацией по статусу, клиенту, месяцу
+- **⚙️ Настройки** — информация о справочниках и статусах подключений
+
+## 🛡️ Безопасность
+
+- Валидация Telegram WebApp `initData` согласно [официальной документации](https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app)
+- Передача `initData` через заголовок `X-Telegram-Init-Data`
+- Все операции записываются в журнал действий
+
+## 🧰 Технологии
+
+- **Backend**: Python 3.11, FastAPI, gspread, aiogram 3.x, pydantic v2
+- **Frontend**: Vanilla JS, Telegram WebApp SDK
+- **Интеграция**: Google Sheets API с сервисным аккаунтом
 
