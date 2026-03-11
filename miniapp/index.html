@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#2563eb" />
+  <title>Финансы</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════
+       HEADER
+  ═══════════════════════════════════════════ -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="header-brand">
+        <span class="header-icon">💼</span>
+        <div>
+          <h1 class="header-title">Финансы</h1>
+          <p class="header-subtitle" id="headerSubtitle">Управление сделками</p>
+        </div>
+      </div>
+      <div class="header-avatar" id="headerAvatar">
+        <span id="avatarInitial">?</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════════════
+       TAB BAR
+  ═══════════════════════════════════════════ -->
+  <nav class="tab-bar" role="tablist" aria-label="Разделы">
+    <button class="tab-item active" data-tab="deals" role="tab" aria-selected="true" aria-controls="tabDeals">
+      <span class="tab-icon">📋</span>
+      <span class="tab-label">Сделки</span>
+    </button>
+    <button class="tab-item" data-tab="new-deal" role="tab" aria-selected="false" aria-controls="tabNewDeal">
+      <span class="tab-icon">➕</span>
+      <span class="tab-label">Новая</span>
+    </button>
+    <button class="tab-item" data-tab="profile" role="tab" aria-selected="false" aria-controls="tabProfile">
+      <span class="tab-icon">👤</span>
+      <span class="tab-label">Профиль</span>
+    </button>
+  </nav>
+
+  <!-- ═══════════════════════════════════════════
+       MAIN CONTENT
+  ═══════════════════════════════════════════ -->
+  <main class="app-main" id="appMain">
+
+    <!-- ── TAB: МОИ СДЕЛКИ ──────────────────── -->
+    <section class="tab-panel active" id="tabDeals" role="tabpanel">
+
+      <!-- Summary row -->
+      <div class="summary-grid" id="summaryGrid">
+        <div class="summary-card summary-card--total">
+          <span class="summary-icon">🗂️</span>
+          <span class="summary-value" id="statTotal">0</span>
+          <span class="summary-label">Всего</span>
+        </div>
+        <div class="summary-card summary-card--active">
+          <span class="summary-icon">⚡</span>
+          <span class="summary-value" id="statActive">0</span>
+          <span class="summary-label">В работе</span>
+        </div>
+        <div class="summary-card summary-card--done">
+          <span class="summary-icon">✅</span>
+          <span class="summary-value" id="statDone">0</span>
+          <span class="summary-label">Завершено</span>
+        </div>
+        <div class="summary-card summary-card--money">
+          <span class="summary-icon">💰</span>
+          <span class="summary-value summary-value--sm" id="statMoney">0 ₽</span>
+          <span class="summary-label">Начислено</span>
+        </div>
+      </div>
+
+      <!-- Filter row -->
+      <div class="filter-bar" id="filterBar" role="group" aria-label="Фильтр по статусу">
+        <button class="filter-chip active" data-filter="all">Все</button>
+        <button class="filter-chip" data-filter="new">Новые</button>
+        <button class="filter-chip" data-filter="in_progress">В работе</button>
+        <button class="filter-chip" data-filter="done">Завершено</button>
+        <button class="filter-chip" data-filter="canceled">Отменено</button>
+      </div>
+
+      <!-- Deal list -->
+      <div class="deals-list" id="dealsList" aria-live="polite" aria-label="Список сделок">
+        <!-- Populated by JS -->
+      </div>
+
+      <!-- Empty state -->
+      <div class="empty-state hidden" id="emptyState">
+        <div class="empty-state__icon">🗃️</div>
+        <h3 class="empty-state__title">Сделок пока нет</h3>
+        <p class="empty-state__desc">Нажмите «Новая», чтобы добавить первую сделку</p>
+        <button class="btn btn--primary" id="emptyAddBtn">Добавить сделку</button>
+      </div>
+
+    </section>
+
+    <!-- ── TAB: НОВАЯ СДЕЛКА ─────────────────── -->
+    <section class="tab-panel" id="tabNewDeal" role="tabpanel">
+
+      <div class="form-container">
+        <div class="section-header">
+          <span class="section-icon">✏️</span>
+          <h2 class="section-title">Новая сделка</h2>
+        </div>
+
+        <form id="dealForm" novalidate autocomplete="off">
+
+          <!-- Client name -->
+          <div class="form-group">
+            <label class="form-label" for="clientName">
+              <span class="label-icon">👤</span> Клиент
+            </label>
+            <input
+              class="form-input"
+              type="text"
+              id="clientName"
+              name="clientName"
+              placeholder="Имя клиента или компании"
+              maxlength="100"
+              required
+            />
+            <span class="form-error" id="clientNameError"></span>
+          </div>
+
+          <!-- Deal type -->
+          <div class="form-group">
+            <label class="form-label" for="dealType">
+              <span class="label-icon">📌</span> Тип сделки
+            </label>
+            <div class="select-wrapper">
+              <select class="form-select" id="dealType" name="dealType" required>
+                <option value="" disabled selected>Выберите тип</option>
+                <option value="sale">Продажа</option>
+                <option value="purchase">Закупка</option>
+                <option value="service">Услуга</option>
+                <option value="lease">Аренда</option>
+                <option value="other">Другое</option>
+              </select>
+              <span class="select-arrow">▾</span>
+            </div>
+            <span class="form-error" id="dealTypeError"></span>
+          </div>
+
+          <!-- Amount -->
+          <div class="form-group">
+            <label class="form-label" for="dealAmount">
+              <span class="label-icon">💵</span> Сумма (₽)
+            </label>
+            <div class="input-with-suffix">
+              <input
+                class="form-input"
+                type="number"
+                id="dealAmount"
+                name="dealAmount"
+                placeholder="0"
+                min="0"
+                step="0.01"
+                required
+              />
+              <span class="input-suffix">₽</span>
+            </div>
+            <span class="form-error" id="dealAmountError"></span>
+          </div>
+
+          <!-- Status -->
+          <div class="form-group">
+            <label class="form-label" for="dealStatus">
+              <span class="label-icon">🔖</span> Статус
+            </label>
+            <div class="select-wrapper">
+              <select class="form-select" id="dealStatus" name="dealStatus" required>
+                <option value="" disabled selected>Выберите статус</option>
+                <option value="new">🆕 Новая</option>
+                <option value="in_progress">⚡ В работе</option>
+                <option value="done">✅ Завершено</option>
+                <option value="canceled">❌ Отменено</option>
+              </select>
+              <span class="select-arrow">▾</span>
+            </div>
+            <span class="form-error" id="dealStatusError"></span>
+          </div>
+
+          <!-- Comment -->
+          <div class="form-group">
+            <label class="form-label" for="dealComment">
+              <span class="label-icon">💬</span> Комментарий
+              <span class="label-optional">(необязательно)</span>
+            </label>
+            <textarea
+              class="form-input form-textarea"
+              id="dealComment"
+              name="dealComment"
+              placeholder="Дополнительные детали по сделке"
+              rows="3"
+              maxlength="500"
+            ></textarea>
+            <span class="char-counter" id="commentCounter">0 / 500</span>
+          </div>
+
+          <!-- Date -->
+          <div class="form-group">
+            <label class="form-label" for="dealDate">
+              <span class="label-icon">📅</span> Дата
+            </label>
+            <input
+              class="form-input"
+              type="date"
+              id="dealDate"
+              name="dealDate"
+              required
+            />
+            <span class="form-error" id="dealDateError"></span>
+          </div>
+
+        </form>
+      </div>
+
+      <!-- Sticky submit -->
+      <div class="sticky-submit" id="stickySubmit">
+        <button class="btn btn--primary btn--full" id="submitDealBtn" type="button">
+          <span class="btn-icon">💾</span>
+          <span class="btn-text">Сохранить сделку</span>
+        </button>
+      </div>
+
+    </section>
+
+    <!-- ── TAB: ПРОФИЛЬ ──────────────────────── -->
+    <section class="tab-panel" id="tabProfile" role="tabpanel">
+
+      <div class="profile-card">
+        <div class="profile-avatar" id="profileAvatar">
+          <span id="profileAvatarInitial">?</span>
+        </div>
+        <h2 class="profile-name" id="profileName">Загрузка...</h2>
+        <p class="profile-username" id="profileUsername">@...</p>
+      </div>
+
+      <div class="stats-list">
+        <div class="section-header">
+          <span class="section-icon">📊</span>
+          <h3 class="section-title">Статистика</h3>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-row">
+            <span class="stat-row__label">Всего сделок</span>
+            <span class="stat-row__value" id="profileStatTotal">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-row__label">Завершено</span>
+            <span class="stat-row__value stat-row__value--done" id="profileStatDone">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-row__label">В работе</span>
+            <span class="stat-row__value stat-row__value--active" id="profileStatActive">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-row__label">Отменено</span>
+            <span class="stat-row__value stat-row__value--canceled" id="profileStatCanceled">0</span>
+          </div>
+          <div class="stat-row stat-row--highlight">
+            <span class="stat-row__label">Сумма начислений</span>
+            <span class="stat-row__value" id="profileStatMoney">0 ₽</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-list">
+        <div class="section-header">
+          <span class="section-icon">⚙️</span>
+          <h3 class="section-title">Настройки</h3>
+        </div>
+        <button class="settings-row" id="clearDataBtn">
+          <span class="settings-row__icon">🗑️</span>
+          <span class="settings-row__label">Очистить данные</span>
+          <span class="settings-row__arrow">›</span>
+        </button>
+        <button class="settings-row" id="exportDataBtn">
+          <span class="settings-row__icon">📤</span>
+          <span class="settings-row__label">Экспорт данных</span>
+          <span class="settings-row__arrow">›</span>
+        </button>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- ═══════════════════════════════════════════
+       DEAL DETAIL MODAL
+  ═══════════════════════════════════════════ -->
+  <div class="modal-overlay hidden" id="dealModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h2 class="modal-title" id="modalTitle">Сделка</h2>
+        <button class="modal-close" id="modalClose" aria-label="Закрыть">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody">
+        <!-- Populated by JS -->
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn--danger btn--full" id="modalDeleteBtn">🗑️ Удалить сделку</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       TOAST
+  ═══════════════════════════════════════════ -->
+  <div class="toast hidden" id="toast" role="status" aria-live="polite">
+    <span class="toast-icon" id="toastIcon"></span>
+    <span class="toast-text" id="toastText"></span>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       LOADING OVERLAY
+  ═══════════════════════════════════════════ -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <p class="loading-text">Загрузка...</p>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
