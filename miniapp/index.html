@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Учёт сделок</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Dashboard -->
+    <section id="dashboard" class="screen active">
+      <h1 class="app-title">📊 Учёт сделок</h1>
+      <p id="user-greeting" class="greeting"></p>
+      <div class="dashboard-buttons">
+        <button class="btn btn-primary" id="btn-create-deal">➕ Создать сделку</button>
+        <button class="btn btn-secondary" id="btn-my-deals">📋 Мои сделки</button>
+      </div>
+    </section>
+
+    <!-- Create Deal Form -->
+    <section id="create-deal" class="screen">
+      <header class="screen-header">
+        <button class="btn-back" id="back-from-create">← Назад</button>
+        <h2>Новая сделка</h2>
+      </header>
+
+      <form id="deal-form" novalidate>
+
+        <div class="form-group">
+          <label for="status">Статус сделки <span class="required">*</span></label>
+          <select id="status" name="status" required>
+            <option value="">— Выберите статус —</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="business_direction">Направление бизнеса <span class="required">*</span></label>
+          <select id="business_direction" name="business_direction" required>
+            <option value="">— Выберите направление —</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="client">Клиент <span class="required">*</span></label>
+          <select id="client" name="client" required>
+            <option value="">— Выберите клиента —</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="manager">Менеджер <span class="required">*</span></label>
+          <select id="manager" name="manager" required>
+            <option value="">— Выберите менеджера —</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="amount_with_vat">Сумма с НДС <span class="required">*</span></label>
+          <input type="number" id="amount_with_vat" name="amount_with_vat"
+                 min="0" step="0.01" placeholder="0.00" required />
+        </div>
+
+        <div class="form-group">
+          <label for="vat_type">Тип НДС <span class="required">*</span></label>
+          <select id="vat_type" name="vat_type" required>
+            <option value="">— Выберите тип НДС —</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="start_date">Дата начала проекта <span class="required">*</span></label>
+          <input type="date" id="start_date" name="start_date" required />
+        </div>
+
+        <div class="form-group">
+          <label for="end_date">Дата окончания проекта <span class="required">*</span></label>
+          <input type="date" id="end_date" name="end_date" required />
+        </div>
+
+        <div class="form-group">
+          <label for="document_link">Документ / Ссылка</label>
+          <input type="url" id="document_link" name="document_link"
+                 placeholder="https://..." />
+        </div>
+
+        <div class="form-group">
+          <label for="comment">Комментарий</label>
+          <textarea id="comment" name="comment" rows="3"
+                    placeholder="Дополнительная информация..."></textarea>
+        </div>
+
+        <div id="form-error" class="error-message hidden"></div>
+
+        <button type="submit" class="btn btn-primary btn-full" id="submit-btn">
+          ✅ Создать сделку
+        </button>
+      </form>
+    </section>
+
+    <!-- My Deals -->
+    <section id="my-deals" class="screen">
+      <header class="screen-header">
+        <button class="btn-back" id="back-from-deals">← Назад</button>
+        <h2>Мои сделки</h2>
+      </header>
+      <div id="deals-list" class="deals-list">
+        <p class="loading-text">Загрузка...</p>
+      </div>
+    </section>
+
+    <!-- Success overlay -->
+    <div id="success-overlay" class="overlay hidden">
+      <div class="overlay-card">
+        <div class="success-icon">✅</div>
+        <h2>Сделка создана!</h2>
+        <p id="success-deal-id" class="deal-id-text"></p>
+        <button class="btn btn-primary" id="success-ok">ОК</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
