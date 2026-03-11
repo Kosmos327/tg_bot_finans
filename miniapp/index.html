@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#2563eb" />
+  <!-- Set API_BASE_URL to your backend URL, e.g. https://api.yourdomain.com -->
+  <meta name="api-base" content="" />
+  <title>Финансовая система</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="header-icon">💼</div>
+      <div class="header-text">
+        <h1>Финансовая система</h1>
+        <p>Учёт сделок и операций</p>
+      </div>
+      <div id="user-avatar" class="user-avatar" title="Пользователь"></div>
+    </div>
+  </header>
+
+  <!-- Tab Navigation -->
+  <nav class="tab-nav" role="tablist">
+    <button class="tab-btn active" data-tab="new-deal" role="tab" aria-selected="true">
+      <span class="tab-icon">🆕</span>
+      <span class="tab-label">Новая сделка</span>
+    </button>
+    <button class="tab-btn" data-tab="my-deals" role="tab" aria-selected="false">
+      <span class="tab-icon">📂</span>
+      <span class="tab-label">Мои сделки</span>
+    </button>
+    <button class="tab-btn" data-tab="settings-tab" role="tab" aria-selected="false">
+      <span class="tab-icon">⚙️</span>
+      <span class="tab-label">Настройки</span>
+    </button>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="main-content">
+
+    <!-- ===== NEW DEAL TAB ===== -->
+    <div id="new-deal" class="tab-panel active">
+      <form id="deal-form" novalidate>
+
+        <!-- Section 1: Main -->
+        <section class="card">
+          <div class="card-header">
+            <span class="section-icon">📋</span>
+            <h2>Основное</h2>
+          </div>
+          <div class="field-group">
+            <div class="field">
+              <label for="status">Статус сделки <span class="required">*</span></label>
+              <div class="select-wrapper">
+                <select id="status" name="status" required>
+                  <option value="">Выберите статус...</option>
+                </select>
+              </div>
+              <span class="field-error" id="status-error"></span>
+            </div>
+            <div class="field">
+              <label for="business_direction">Направление бизнеса <span class="required">*</span></label>
+              <div class="select-wrapper">
+                <select id="business_direction" name="business_direction" required>
+                  <option value="">Выберите направление...</option>
+                </select>
+              </div>
+              <span class="field-error" id="business_direction-error"></span>
+            </div>
+            <div class="field">
+              <label for="client">Клиент <span class="required">*</span></label>
+              <div class="select-wrapper">
+                <select id="client" name="client" required>
+                  <option value="">Выберите клиента...</option>
+                </select>
+              </div>
+              <span class="field-error" id="client-error"></span>
+            </div>
+            <div class="field">
+              <label for="manager">Менеджер <span class="required">*</span></label>
+              <div class="select-wrapper">
+                <select id="manager" name="manager" required>
+                  <option value="">Выберите менеджера...</option>
+                </select>
+              </div>
+              <span class="field-error" id="manager-error"></span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Section 2: Finance -->
+        <section class="card">
+          <div class="card-header">
+            <span class="section-icon">💰</span>
+            <h2>Финансы</h2>
+          </div>
+          <div class="field-group">
+            <div class="field">
+              <label for="charged_with_vat">Начислено с НДС, ₽ <span class="required">*</span></label>
+              <div class="input-wrapper">
+                <input type="number" id="charged_with_vat" name="charged_with_vat"
+                  placeholder="0.00" min="0" step="0.01" required />
+                <span class="input-suffix">₽</span>
+              </div>
+              <span class="field-error" id="charged_with_vat-error"></span>
+            </div>
+            <div class="field">
+              <label for="vat_type">Наличие НДС <span class="required">*</span></label>
+              <div class="select-wrapper">
+                <select id="vat_type" name="vat_type" required>
+                  <option value="">Выберите тип НДС...</option>
+                </select>
+              </div>
+              <span class="field-error" id="vat_type-error"></span>
+            </div>
+            <div class="field">
+              <label for="paid">Оплачено, ₽</label>
+              <div class="input-wrapper">
+                <input type="number" id="paid" name="paid"
+                  placeholder="0.00" min="0" step="0.01" />
+                <span class="input-suffix">₽</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Section 3: Dates -->
+        <section class="card">
+          <div class="card-header">
+            <span class="section-icon">📅</span>
+            <h2>Сроки</h2>
+          </div>
+          <div class="field-group">
+            <div class="field">
+              <label for="project_start_date">Дата начала проекта <span class="required">*</span></label>
+              <input type="date" id="project_start_date" name="project_start_date" required />
+              <span class="field-error" id="project_start_date-error"></span>
+            </div>
+            <div class="field">
+              <label for="project_end_date">Дата окончания проекта <span class="required">*</span></label>
+              <input type="date" id="project_end_date" name="project_end_date" required />
+              <span class="field-error" id="project_end_date-error"></span>
+            </div>
+            <div class="field">
+              <label for="act_date">Дата выставления акта</label>
+              <input type="date" id="act_date" name="act_date" />
+            </div>
+          </div>
+        </section>
+
+        <!-- Section 4: Expenses & Bonuses -->
+        <section class="card">
+          <div class="card-header">
+            <span class="section-icon">📊</span>
+            <h2>Расходы и бонусы</h2>
+          </div>
+          <div class="field-group">
+            <div class="field-row">
+              <div class="field">
+                <label for="variable_expense_1">Переменный расход 1, ₽</label>
+                <div class="input-wrapper">
+                  <input type="number" id="variable_expense_1" name="variable_expense_1"
+                    placeholder="0.00" min="0" step="0.01" />
+                  <span class="input-suffix">₽</span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="variable_expense_2">Переменный расход 2, ₽</label>
+                <div class="input-wrapper">
+                  <input type="number" id="variable_expense_2" name="variable_expense_2"
+                    placeholder="0.00" min="0" step="0.01" />
+                  <span class="input-suffix">₽</span>
+                </div>
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label for="manager_bonus_percent">Бонус менеджера, %</label>
+                <div class="input-wrapper">
+                  <input type="number" id="manager_bonus_percent" name="manager_bonus_percent"
+                    placeholder="0" min="0" max="100" step="0.1" />
+                  <span class="input-suffix">%</span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="manager_bonus_paid">Бонус выплачено, ₽</label>
+                <div class="input-wrapper">
+                  <input type="number" id="manager_bonus_paid" name="manager_bonus_paid"
+                    placeholder="0.00" min="0" step="0.01" />
+                  <span class="input-suffix">₽</span>
+                </div>
+              </div>
+            </div>
+            <div class="field">
+              <label for="general_production_expense">Общепроизводственный расход, ₽</label>
+              <div class="input-wrapper">
+                <input type="number" id="general_production_expense" name="general_production_expense"
+                  placeholder="0.00" min="0" step="0.01" />
+                <span class="input-suffix">₽</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Section 5: Additional -->
+        <section class="card">
+          <div class="card-header">
+            <span class="section-icon">📎</span>
+            <h2>Дополнительно</h2>
+          </div>
+          <div class="field-group">
+            <div class="field">
+              <label for="source">Источник</label>
+              <div class="select-wrapper">
+                <select id="source" name="source">
+                  <option value="">Выберите источник...</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label for="document_link">Документ / Ссылка</label>
+              <input type="url" id="document_link" name="document_link"
+                placeholder="https://..." />
+            </div>
+            <div class="field">
+              <label for="comment">Комментарий</label>
+              <textarea id="comment" name="comment" rows="3"
+                placeholder="Введите комментарий..."></textarea>
+            </div>
+          </div>
+        </section>
+
+        <!-- Summary block -->
+        <section class="card summary-card" id="deal-summary" style="display:none;">
+          <div class="card-header">
+            <span class="section-icon">✅</span>
+            <h2>Итог сделки</h2>
+          </div>
+          <div class="summary-grid">
+            <div class="summary-item">
+              <span class="summary-label">Клиент</span>
+              <span class="summary-value" id="sum-client">—</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Сумма с НДС</span>
+              <span class="summary-value" id="sum-amount">—</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Статус</span>
+              <span class="summary-value" id="sum-status">—</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Менеджер</span>
+              <span class="summary-value" id="sum-manager">—</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Form actions -->
+        <div class="form-actions sticky-actions">
+          <button type="submit" class="btn btn-primary" id="submit-btn">
+            <span class="btn-icon">💾</span>
+            <span class="btn-text">Сохранить сделку</span>
+            <span class="btn-loader" style="display:none;">
+              <span class="spinner"></span>
+            </span>
+          </button>
+          <button type="button" class="btn btn-secondary" id="clear-btn">
+            Очистить форму
+          </button>
+        </div>
+      </form>
+
+      <!-- Success Screen -->
+      <div id="success-screen" class="success-screen" style="display:none;">
+        <div class="success-content">
+          <div class="success-icon">🎉</div>
+          <h2>Сделка создана!</h2>
+          <p id="success-deal-id" class="success-deal-id"></p>
+          <p class="success-subtitle">Данные сохранены в Google Sheets</p>
+          <button class="btn btn-primary" id="new-deal-btn">
+            <span class="btn-icon">🆕</span>
+            Создать ещё сделку
+          </button>
+          <button class="btn btn-secondary" id="view-deals-btn">
+            <span class="btn-icon">📂</span>
+            Посмотреть мои сделки
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== MY DEALS TAB ===== -->
+    <div id="my-deals" class="tab-panel" style="display:none;">
+      <!-- Filters -->
+      <div class="filters-bar">
+        <div class="filter-chip-row">
+          <div class="field">
+            <label for="filter-status">Статус</label>
+            <div class="select-wrapper select-wrapper--sm">
+              <select id="filter-status">
+                <option value="">Все</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label for="filter-client">Клиент</label>
+            <div class="select-wrapper select-wrapper--sm">
+              <select id="filter-client">
+                <option value="">Все</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label for="filter-month">Месяц</label>
+            <input type="month" id="filter-month" />
+          </div>
+        </div>
+        <button class="btn btn-sm btn-outline" id="refresh-deals-btn">
+          🔄 Обновить
+        </button>
+      </div>
+
+      <!-- Loading state -->
+      <div id="deals-loading" class="loading-state" style="display:none;">
+        <div class="spinner spinner--lg"></div>
+        <p>Загрузка сделок...</p>
+      </div>
+
+      <!-- Empty state -->
+      <div id="deals-empty" class="empty-state" style="display:none;">
+        <div class="empty-icon">📭</div>
+        <h3>Сделок пока нет</h3>
+        <p>Создайте первую сделку, нажав вкладку «Новая сделка»</p>
+        <button class="btn btn-primary" id="goto-new-deal-btn">
+          🆕 Создать сделку
+        </button>
+      </div>
+
+      <!-- Deals list -->
+      <div id="deals-list" class="deals-list"></div>
+    </div>
+
+    <!-- ===== SETTINGS TAB ===== -->
+    <div id="settings-tab" class="tab-panel" style="display:none;">
+      <section class="card">
+        <div class="card-header">
+          <span class="section-icon">📊</span>
+          <h2>Справочники</h2>
+        </div>
+        <div class="settings-grid">
+          <div class="settings-stat">
+            <span class="stat-icon">📌</span>
+            <div>
+              <div class="stat-label">Статусы</div>
+              <div class="stat-value" id="cnt-statuses">—</div>
+            </div>
+          </div>
+          <div class="settings-stat">
+            <span class="stat-icon">👥</span>
+            <div>
+              <div class="stat-label">Клиенты</div>
+              <div class="stat-value" id="cnt-clients">—</div>
+            </div>
+          </div>
+          <div class="settings-stat">
+            <span class="stat-icon">👤</span>
+            <div>
+              <div class="stat-label">Менеджеры</div>
+              <div class="stat-value" id="cnt-managers">—</div>
+            </div>
+          </div>
+          <div class="settings-stat">
+            <span class="stat-icon">🏢</span>
+            <div>
+              <div class="stat-label">Направления</div>
+              <div class="stat-value" id="cnt-directions">—</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <span class="section-icon">🔌</span>
+          <h2>Статус подключений</h2>
+        </div>
+        <div class="connection-list">
+          <div class="connection-item">
+            <div class="connection-dot" id="dot-telegram"></div>
+            <span>Telegram Auth</span>
+            <span class="connection-status" id="status-telegram">Проверка...</span>
+          </div>
+          <div class="connection-item">
+            <div class="connection-dot" id="dot-api"></div>
+            <span>API сервер</span>
+            <span class="connection-status" id="status-api">Проверка...</span>
+          </div>
+          <div class="connection-item">
+            <div class="connection-dot" id="dot-sheets"></div>
+            <span>Google Sheets</span>
+            <span class="connection-status" id="status-sheets">Проверка...</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" id="user-info-card" style="display:none;">
+        <div class="card-header">
+          <span class="section-icon">👤</span>
+          <h2>Текущий пользователь</h2>
+        </div>
+        <div id="user-info-content" class="user-info-content"></div>
+      </section>
+    </div>
+
+  </main>
+
+  <!-- Deal Detail Modal -->
+  <div id="deal-modal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h2 id="modal-title">Сделка</h2>
+        <button class="modal-close" id="modal-close-btn" aria-label="Закрыть">✕</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
