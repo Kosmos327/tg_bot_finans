@@ -73,6 +73,12 @@ function fmtAmount(val) {
   return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(n);
 }
 
+function dealRemaining(deal) {
+  const amount = parseFloat(String(deal.amount_with_vat || 0).replace(',', '.'));
+  const paid   = parseFloat(String(deal.paid || 0).replace(',', '.'));
+  return String(Math.max(amount - paid, 0));
+}
+
 function fmtNum(n) {
   if (n === null || n === undefined) return '—';
   return new Intl.NumberFormat('ru-RU').format(n);
@@ -446,7 +452,7 @@ function renderPaymentsTab(container) {
       <div class="deal-client">${deal.client || '—'}</div>
       <div class="deal-row"><span class="label">Начислено</span><span class="value">${fmtAmount(deal.amount_with_vat)}</span></div>
       <div class="deal-row"><span class="label">Оплачено</span><span class="value">${fmtAmount(deal.paid)}</span></div>
-      <div class="deal-row"><span class="label">Остаток</span><span class="value">${fmtAmount((parseFloat(deal.amount_with_vat||0)-parseFloat(deal.paid||0)).toString())}</span></div>
+      <div class="deal-row"><span class="label">Остаток</span><span class="value">${fmtAmount(dealRemaining(deal))}</span></div>
       <div class="deal-row"><span class="label">Дата акта</span><span class="value">${deal.act_date || '—'}</span></div>
     `;
     card.addEventListener('click', () => openDealModal(deal));
@@ -880,7 +886,7 @@ function buildDealForm(existingDeal, editableFields, onSubmit, submitLabel) {
   submitBtn.type = 'button';
   submitBtn.addEventListener('click', () => {
     const data = {};
-    wrapper.querySelectorAll('input:not([readonly]), select, textarea').forEach(el => {
+    wrapper.querySelectorAll('input:not([readonly]):not([disabled]), select:not([disabled]), textarea:not([readonly]):not([disabled])').forEach(el => {
       if (el.name) data[el.name] = el.value;
     });
     onSubmit(data);

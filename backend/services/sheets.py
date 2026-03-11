@@ -63,6 +63,16 @@ _SCOPES = [
 ]
 
 
+def _col_letter(col_index: int) -> str:
+    """Convert a 0-based column index to a spreadsheet column letter (A, B, …, Z, AA, …)."""
+    result = ""
+    n = col_index + 1
+    while n:
+        n, remainder = divmod(n - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+
 def _get_client() -> gspread.Client:
     creds = Credentials.from_service_account_file(GOOGLE_CREDENTIALS_FILE, scopes=_SCOPES)
     return gspread.authorize(creds)
@@ -212,7 +222,7 @@ def get_all_deals() -> List[Deal]:
     for row in rows:
         if not row or not row[0].strip():
             continue
-        if row[0].strip().lower() in ("id сделки", "id", "id сделки"):
+        if row[0].strip().lower() in ("id сделки", "id"):
             continue  # header
         try:
             deals.append(_row_to_deal(row))
@@ -267,7 +277,8 @@ def update_deal(deal_id: str, deal_data: Dict[str, Any]) -> Optional[Deal]:
     for idx, row in enumerate(rows, start=1):
         if row and row[0].strip() == deal_id:
             updated_row = _deal_to_row(deal_data, row)
-            ws.update(f"A{idx}:T{idx}", [updated_row])
+            last_col = _col_letter(DEALS_TOTAL_COLS - 1)
+            ws.update(f"A{idx}:{last_col}{idx}", [updated_row])
             return _row_to_deal(updated_row)
     return None
 
