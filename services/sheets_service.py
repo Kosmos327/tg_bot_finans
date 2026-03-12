@@ -8,6 +8,7 @@ without breaking the bot.
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from typing import Any
@@ -28,9 +29,20 @@ _SCOPES = [
 # Client creation
 # ---------------------------------------------------------------------------
 
-def build_client(credentials_file: str) -> gspread.Client:
-    """Return an authenticated *gspread* client."""
-    creds = Credentials.from_service_account_file(credentials_file, scopes=_SCOPES)
+def build_client(service_account_json: str) -> gspread.Client:
+    """Return an authenticated *gspread* client from a JSON string.
+
+    Args:
+        service_account_json: Full JSON content of the service account key
+                              (i.e. the value of GOOGLE_SERVICE_ACCOUNT_JSON).
+    """
+    try:
+        service_account_info = json.loads(service_account_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "GOOGLE_SERVICE_ACCOUNT_JSON contains invalid JSON."
+        ) from exc
+    creds = Credentials.from_service_account_info(service_account_info, scopes=_SCOPES)
     return gspread.authorize(creds)
 
 

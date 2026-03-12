@@ -8,8 +8,7 @@ from typing import Dict, List
 # ---------------------------------------------------------------------------
 # Google Sheets configuration
 # ---------------------------------------------------------------------------
-SPREADSHEET_ID: str = os.getenv("SPREADSHEET_ID", "")
-GOOGLE_CREDENTIALS_FILE: str = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
+SPREADSHEET_ID: str = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
 
 SHEET_DEALS = "Учёт сделок"
 SHEET_SETTINGS = "Настройки"
@@ -18,8 +17,8 @@ SHEET_JOURNAL = "Журнал действий"
 # ---------------------------------------------------------------------------
 # Telegram configuration
 # ---------------------------------------------------------------------------
-BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
-MINI_APP_URL: str = os.getenv("MINI_APP_URL", "https://example.com/miniapp")
+BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+MINI_APP_URL: str = os.getenv("WEBAPP_URL", "")
 
 # ---------------------------------------------------------------------------
 # Role constants

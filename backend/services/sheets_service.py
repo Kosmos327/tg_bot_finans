@@ -2,7 +2,7 @@
 sheets_service.py – Low-level Google Sheets client and reusable header-mapping helpers.
 
 Responsibilities:
-  - Initialise the gspread client from a service-account file.
+  - Initialise the gspread client from GOOGLE_SERVICE_ACCOUNT_JSON env var.
   - Expose helper functions used by the higher-level service modules.
 
 Public helpers
@@ -15,6 +15,7 @@ row_to_dict(hmap, row)        – list → dict keyed by header names
 dict_to_row(hmap, payload, ordered_headers) – dict → list in header order
 """
 
+import json
 import logging
 from typing import Dict, List
 
@@ -65,20 +66,26 @@ class BadCredentialsError(SheetsError):
 
 
 def _get_client() -> gspread.Client:
-    """Create and return an authorised gspread client."""
-    try:
-        creds = Credentials.from_service_account_file(
-            settings.google_service_account_file,
-            scopes=SCOPES,
-        )
-        return gspread.authorize(creds)
-    except FileNotFoundError as exc:
+    """Create and return an authorised gspread client using GOOGLE_SERVICE_ACCOUNT_JSON."""
+    raw_json = settings.google_service_account_json
+    if not raw_json:
         raise BadCredentialsError(
-            f"Service-account file not found: {settings.google_service_account_file}"
+            "GOOGLE_SERVICE_ACCOUNT_JSON environment variable is not set. "
+            "It must contain the full JSON content of the service account key."
+        )
+    try:
+        service_account_info = json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+        raise BadCredentialsError(
+            "GOOGLE_SERVICE_ACCOUNT_JSON contains invalid JSON. "
+            "Ensure the variable holds the complete service account key as JSON."
         ) from exc
+    try:
+        creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
+        return gspread.authorize(creds)
     except Exception as exc:
         raise BadCredentialsError(
-            f"Failed to initialise Google Sheets client: {exc}"
+            f"Failed to initialise Google Sheets client from service account info: {exc}"
         ) from exc
 
 
