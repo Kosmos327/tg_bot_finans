@@ -1,10 +1,28 @@
+# Python
 __pycache__/
 *.py[cod]
 *.pyo
-.pytest_cache/
+*.pyd
+*.so
+*.egg
 *.egg-info/
 dist/
 build/
-.env
-.venv
+.eggs/
+
+# Virtual envs
+.venv/
 venv/
+env/
+
+# Secrets & credentials
+.env
+credentials.json
+
+# pytest
+.pytest_cache/
+.cache/
+
+# IDE
+.idea/
+.vscode/
