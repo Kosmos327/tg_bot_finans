@@ -40,99 +40,125 @@ def _safe_float(value) -> float:
 
 
 def _build_manager_summary(deals: List[dict]) -> Dict[str, Any]:
-    in_progress = [d for d in deals if d.get("status") and "завершен" not in d["status"].lower()]
-    completed = [d for d in deals if d.get("status") and "завершен" in d["status"].lower()]
-    total_amount = sum(_safe_float(d.get("charged_with_vat")) for d in deals)
+    in_progress = 0
+    completed = 0
+    total_amount = 0.0
+    for d in deals:
+        status = (d.get("status") or "").lower()
+        amount = _safe_float(d.get("charged_with_vat"))
+        total_amount += amount
+        if "завершен" in status:
+            completed += 1
+        else:
+            in_progress += 1
     return {
         "total_my_deals": len(deals),
-        "in_progress": len(in_progress),
-        "completed": len(completed),
+        "in_progress": in_progress,
+        "completed": completed,
         "total_amount": total_amount,
     }
 
 
 def _build_accountant_summary(deals: List[dict]) -> Dict[str, Any]:
-    awaiting, partial, full_paid = [], [], []
+    awaiting = partial = full_paid = 0
+    total_receivable = 0.0
+    total_paid = 0.0
     for d in deals:
         amount = _safe_float(d.get("charged_with_vat"))
         paid = _safe_float(d.get("paid"))
+        total_paid += paid
         if paid <= 0:
-            awaiting.append(d)
+            awaiting += 1
         elif paid < amount:
-            partial.append(d)
+            partial += 1
         else:
-            full_paid.append(d)
-    total_receivable = sum(
-        _safe_float(d.get("charged_with_vat")) - _safe_float(d.get("paid")) for d in deals
-    )
-    total_paid = sum(_safe_float(d.get("paid")) for d in deals)
+            full_paid += 1
+        total_receivable += max(amount - paid, 0)
     return {
-        "awaiting_payment": len(awaiting),
-        "partially_paid": len(partial),
-        "fully_paid": len(full_paid),
-        "total_receivable": max(total_receivable, 0),
+        "awaiting_payment": awaiting,
+        "partially_paid": partial,
+        "fully_paid": full_paid,
+        "total_receivable": total_receivable,
         "total_paid": total_paid,
         "total_deals": len(deals),
     }
 
 
 def _build_operations_summary(deals: List[dict]) -> Dict[str, Any]:
-    active = [d for d in deals if d.get("status") and "завершен" not in d["status"].lower()]
-    total_amount = sum(_safe_float(d.get("charged_with_vat")) for d in deals)
-    total_paid = sum(_safe_float(d.get("paid")) for d in deals)
-    receivable = max(total_amount - total_paid, 0)
-    total_expenses = sum(
-        _safe_float(d.get("variable_expense_1"))
-        + _safe_float(d.get("variable_expense_2"))
-        + _safe_float(d.get("general_production_expense"))
-        for d in deals
-    )
-    gross_profit = total_paid - total_expenses
-
+    active = 0
+    total_amount = 0.0
+    total_paid = 0.0
+    total_expenses = 0.0
     mgr_map: Dict[str, Dict[str, Any]] = {}
+
     for d in deals:
+        status = (d.get("status") or "").lower()
+        amount = _safe_float(d.get("charged_with_vat"))
+        paid = _safe_float(d.get("paid"))
+        expenses = (
+            _safe_float(d.get("variable_expense_1"))
+            + _safe_float(d.get("variable_expense_2"))
+            + _safe_float(d.get("general_production_expense"))
+        )
+        total_amount += amount
+        total_paid += paid
+        total_expenses += expenses
+        if "завершен" not in status:
+            active += 1
+
         mgr = d.get("manager") or "Неизвестно"
         if mgr not in mgr_map:
             mgr_map[mgr] = {"manager": mgr, "deals": 0, "amount": 0.0}
         mgr_map[mgr]["deals"] += 1
-        mgr_map[mgr]["amount"] += _safe_float(d.get("charged_with_vat"))
+        mgr_map[mgr]["amount"] += amount
 
     return {
         "total_deals": len(deals),
-        "active_deals": len(active),
+        "active_deals": active,
         "total_amount": total_amount,
         "total_paid": total_paid,
-        "receivable": receivable,
+        "receivable": max(total_amount - total_paid, 0),
         "total_expenses": total_expenses,
-        "gross_profit": gross_profit,
+        "gross_profit": total_paid - total_expenses,
         "by_manager": list(mgr_map.values()),
     }
 
 
 def _build_sales_summary(deals: List[dict]) -> Dict[str, Any]:
-    in_progress = [d for d in deals if d.get("status") and "завершен" not in d["status"].lower()]
-    new_deals = [d for d in deals if d.get("status") and "нов" in d["status"].lower()]
-    completed = [d for d in deals if d.get("status") and "завершен" in d["status"].lower()]
-    total_amount = sum(_safe_float(d.get("charged_with_vat")) for d in deals)
-    avg = total_amount / len(deals) if deals else 0.0
-
+    in_progress = 0
+    new_deals = 0
+    completed = 0
+    total_amount = 0.0
     mgr_map: Dict[str, Dict[str, Any]] = {}
+
     for d in deals:
+        status = (d.get("status") or "").lower()
+        amount = _safe_float(d.get("charged_with_vat"))
+        total_amount += amount
+
+        if "завершен" in status:
+            completed += 1
+        else:
+            in_progress += 1
+        if "нов" in status:
+            new_deals += 1
+
         mgr = d.get("manager") or "Неизвестно"
         if mgr not in mgr_map:
             mgr_map[mgr] = {"manager": mgr, "deals": 0, "amount": 0.0, "completed": 0}
         mgr_map[mgr]["deals"] += 1
-        mgr_map[mgr]["amount"] += _safe_float(d.get("charged_with_vat"))
-        if d.get("status") and "завершен" in d["status"].lower():
+        mgr_map[mgr]["amount"] += amount
+        if "завершен" in status:
             mgr_map[mgr]["completed"] += 1
 
     for v in mgr_map.values():
         v["avg"] = v["amount"] / v["deals"] if v["deals"] else 0.0
 
+    avg = total_amount / len(deals) if deals else 0.0
     return {
-        "deals_in_progress": len(in_progress),
-        "new_deals": len(new_deals),
-        "completed_deals": len(completed),
+        "deals_in_progress": in_progress,
+        "new_deals": new_deals,
+        "completed_deals": completed,
         "total_amount": total_amount,
         "avg_deal_amount": avg,
         "by_manager": list(mgr_map.values()),

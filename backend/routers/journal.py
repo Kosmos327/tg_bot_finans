@@ -71,7 +71,8 @@ async def recent_journal(
         raise HTTPException(status_code=500, detail="Journal unavailable") from exc
 
     entries: List[Dict[str, Any]] = []
-    for row in reversed(all_rows[1:]):  # skip header, newest first
+    for i in range(len(all_rows) - 1, 0, -1):  # iterate from last row, skip header (index 0)
+        row = all_rows[i]
         if not any(c.strip() for c in row):
             continue
         entry: Dict[str, Any] = {}
