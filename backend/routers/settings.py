@@ -1,25 +1,21 @@
-"""Settings router – user/role configuration."""
+import logging
 
-from typing import Any, Dict, List
+from fastapi import APIRouter, HTTPException
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from backend.models.settings import SettingsResponse
+from backend.services import settings_service
 
-from backend.config import ROLE_MANAGER, ROLE_ACCOUNTANT
-from backend.dependencies import get_current_user, require_active_user
-from backend.models.schemas import MeResponse
-from backend.services.sheets import get_active_users, get_all_settings_users
+logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/settings", tags=["settings"])
+router = APIRouter(tags=["settings"])
 
 
-@router.get("", response_model=List[Dict[str, Any]])
-def get_settings(current_user: MeResponse = Depends(get_current_user)):
-    require_active_user(current_user)
-    # Only ops director and head_of_sales can see all settings
-    if current_user.role in (ROLE_MANAGER, ROLE_ACCOUNTANT):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Недостаточно прав для просмотра настроек",
-        )
-    users = get_active_users()
-    return [u.model_dump() for u in users]
+@router.get("/settings", response_model=SettingsResponse)
+async def get_settings() -> SettingsResponse:
+    """Load reference data from the 'Настройки' sheet."""
+    try:
+        data = settings_service.load_all_settings()
+        return SettingsResponse(**data)
+    except Exception as exc:
+        logger.error("Error loading settings: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

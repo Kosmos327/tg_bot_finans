@@ -1,23 +1,24 @@
-"""
-FastAPI application entry point for tg_bot_finans.
-"""
+import logging
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-import os
 
-from backend.routers import auth, dashboard, deals, journal, settings
+from backend.routers import deals, settings, auth
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="tg_bot_finans API",
-    description="Role-based financial management system for Telegram Mini App",
-    version="1.0.0",
+    title="Финансовая система API",
+    description="Backend API для Telegram Mini App учёта сделок",
+    version="2.0.0",
 )
 
-# ---------------------------------------------------------------------------
-# CORS (allow all in dev; restrict in production)
-# ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,23 +27,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------------
-# Routers
-# ---------------------------------------------------------------------------
-app.include_router(auth.router)
 app.include_router(deals.router)
-app.include_router(dashboard.router)
-app.include_router(journal.router)
 app.include_router(settings.router)
+app.include_router(auth.router)
 
-# ---------------------------------------------------------------------------
-# Static files (Mini App)
-# ---------------------------------------------------------------------------
-miniapp_path = os.path.join(os.path.dirname(__file__), "..", "miniapp")
-if os.path.isdir(miniapp_path):
-    app.mount("/app", StaticFiles(directory=miniapp_path, html=True), name="miniapp")
+# Serve miniapp static files if directory exists
+_miniapp_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "miniapp")
+if os.path.isdir(_miniapp_dir):
+    app.mount("/miniapp", StaticFiles(directory=_miniapp_dir, html=True), name="miniapp")
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok"}
+async def health_check() -> dict:
+    return {"status": "ok", "service": "tg_bot_finans"}
+
+
+@app.get("/")
+async def root() -> dict:
+    return {"message": "Финансовая система API", "docs": "/docs"}
