@@ -1,89 +1,77 @@
-import logging
-from typing import Optional
+"""Deals router."""
 
-from fastapi import APIRouter, Header, HTTPException
+from typing import Any, Dict, List
 
-from backend.models.deal import DealCreate, DealResponse, DealUpdate
-from backend.models.common import SuccessResponse
-from backend.services import deal_service
-from backend.services.telegram_auth import extract_user_from_init_data
-from config.config import settings
+from fastapi import APIRouter, Depends, HTTPException, status
 
-logger = logging.getLogger(__name__)
+from backend.dependencies import get_current_user, require_active_user
+from backend.models.schemas import Deal, DealCreate, DealUpdate, MeResponse
+from backend.services.deals import (
+    create_deal_service,
+    get_all_deals_service,
+    get_deal_service,
+    get_deals_for_user,
+    update_deal_service,
+)
 
-router = APIRouter(prefix="/deal", tags=["deals"])
-
-
-def _get_user_id_from_header(init_data: Optional[str]) -> str:
-    """Extract Telegram user ID from initData header (best-effort)."""
-    if init_data:
-        user = extract_user_from_init_data(init_data)
-        if user:
-            return str(user.get("id", ""))
-    return ""
+router = APIRouter(prefix="/deals", tags=["deals"])
 
 
-@router.post("/create", response_model=dict)
-async def create_deal(
-    deal: DealCreate,
-    x_telegram_init_data: Optional[str] = Header(default=None),
-) -> dict:
-    """Create a new deal and write it to Google Sheets."""
-    try:
-        user_id = _get_user_id_from_header(x_telegram_init_data)
-        deal_id = deal_service.create_deal(
-            deal_data=deal.model_dump(),
-            telegram_user_id=user_id,
+@router.get("/user", response_model=List[Dict[str, Any]])
+def list_my_deals(current_user: MeResponse = Depends(get_current_user)):
+    """Return deals visible to the current user (manager sees only own)."""
+    require_active_user(current_user)
+    deals = get_deals_for_user(current_user)
+    return [d.model_dump() for d in deals]
+
+
+@router.get("/all", response_model=List[Dict[str, Any]])
+def list_all_deals(current_user: MeResponse = Depends(get_current_user)):
+    """Return all deals (restricted to non-manager roles)."""
+    require_active_user(current_user)
+    from backend.config import ROLE_MANAGER
+    if current_user.role == ROLE_MANAGER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Менеджер не может просматривать все сделки",
         )
-        return {"success": True, "deal_id": deal_id}
-    except Exception as exc:
-        logger.error("Error creating deal: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    deals = get_all_deals_service()
+    return [d.model_dump() for d in deals]
 
 
-@router.get("/user", response_model=list)
-async def get_user_deals(
-    manager: Optional[str] = None,
-    x_telegram_init_data: Optional[str] = Header(default=None),
-) -> list:
-    """Return deals, optionally filtered by manager name."""
-    try:
-        deals = deal_service.get_user_deals(manager_name=manager)
-        return deals
-    except Exception as exc:
-        logger.error("Error fetching user deals: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+@router.get("/{deal_id}", response_model=Dict[str, Any])
+def get_deal(deal_id: str, current_user: MeResponse = Depends(get_current_user)):
+    require_active_user(current_user)
+    deal = get_deal_service(deal_id, current_user)
+    if not deal:
+        raise HTTPException(status_code=404, detail="Сделка не найдена")
+    return deal.model_dump()
 
 
-@router.get("/{deal_id}", response_model=dict)
-async def get_deal(deal_id: str) -> dict:
-    """Get a single deal by ID."""
-    deal = deal_service.get_deal_by_id(deal_id)
-    if deal is None:
-        raise HTTPException(status_code=404, detail="Deal not found")
-    return deal
+@router.post("/create", response_model=Dict[str, Any], status_code=201)
+def create_deal(
+    payload: DealCreate,
+    current_user: MeResponse = Depends(get_current_user),
+):
+    require_active_user(current_user)
+    from backend.config import ROLE_ACCOUNTANT
+    if current_user.role == ROLE_ACCOUNTANT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Бухгалтер не может создавать сделки",
+        )
+    deal = create_deal_service(payload.model_dump(exclude_none=True), current_user)
+    return deal.model_dump()
 
 
-@router.put("/{deal_id}", response_model=dict)
-async def update_deal(
+@router.put("/{deal_id}", response_model=Dict[str, Any])
+def update_deal(
     deal_id: str,
-    update: DealUpdate,
-    x_telegram_init_data: Optional[str] = Header(default=None),
-) -> dict:
-    """Update an existing deal."""
-    try:
-        user_id = _get_user_id_from_header(x_telegram_init_data)
-        update_data = {k: v for k, v in update.model_dump().items() if v is not None}
-        success = deal_service.update_deal(
-            deal_id=deal_id,
-            update_data=update_data,
-            telegram_user_id=user_id,
-        )
-        if not success:
-            raise HTTPException(status_code=404, detail="Deal not found")
-        return {"success": True, "deal_id": deal_id}
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Error updating deal %s: %s", deal_id, exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    payload: DealUpdate,
+    current_user: MeResponse = Depends(get_current_user),
+):
+    require_active_user(current_user)
+    updated = update_deal_service(deal_id, payload.model_dump(exclude_none=True), current_user)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Сделка не найдена или доступ запрещён")
+    return updated.model_dump()

@@ -1,32 +1,14 @@
-import logging
-from typing import Optional
+"""Auth router – /me endpoint."""
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends
 
-from backend.services.telegram_auth import (
-    validate_telegram_init_data,
-    extract_user_from_init_data,
-)
-from config.config import settings
+from backend.dependencies import get_current_user
+from backend.models.schemas import MeResponse
 
-logger = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/me", tags=["auth"])
 
 
-@router.post("/validate")
-async def validate_auth(
-    x_telegram_init_data: Optional[str] = Header(default=None),
-) -> dict:
-    """Validate Telegram initData and return user info."""
-    if not x_telegram_init_data:
-        raise HTTPException(status_code=401, detail="Missing initData")
-
-    token = settings.telegram_bot_token
-    is_valid = validate_telegram_init_data(x_telegram_init_data, token)
-
-    if not is_valid:
-        raise HTTPException(status_code=401, detail="Invalid initData")
-
-    user = extract_user_from_init_data(x_telegram_init_data)
-    return {"valid": True, "user": user}
+@router.get("", response_model=MeResponse)
+def me(current_user: MeResponse = Depends(get_current_user)) -> MeResponse:
+    """Return the current user's role metadata."""
+    return current_user

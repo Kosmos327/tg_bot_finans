@@ -1,21 +1,25 @@
-import logging
+"""Settings router – user/role configuration."""
 
-from fastapi import APIRouter, HTTPException
+from typing import Any, Dict, List
 
-from backend.models.settings import SettingsResponse
-from backend.services import sheets_service
+from fastapi import APIRouter, Depends, HTTPException, status
 
-logger = logging.getLogger(__name__)
+from backend.config import ROLE_MANAGER, ROLE_ACCOUNTANT
+from backend.dependencies import get_current_user, require_active_user
+from backend.models.schemas import MeResponse
+from backend.services.sheets import get_active_users, get_all_settings_users
 
-router = APIRouter(tags=["settings"])
+router = APIRouter(prefix="/settings", tags=["settings"])
 
 
-@router.get("/settings", response_model=SettingsResponse)
-async def get_settings() -> SettingsResponse:
-    """Load reference data from Google Sheets 'Настройки' sheet."""
-    try:
-        data = sheets_service.load_settings()
-        return SettingsResponse(**data)
-    except Exception as exc:
-        logger.error("Error loading settings: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+@router.get("", response_model=List[Dict[str, Any]])
+def get_settings(current_user: MeResponse = Depends(get_current_user)):
+    require_active_user(current_user)
+    # Only ops director and head_of_sales can see all settings
+    if current_user.role in (ROLE_MANAGER, ROLE_ACCOUNTANT):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Недостаточно прав для просмотра настроек",
+        )
+    users = get_active_users()
+    return [u.model_dump() for u in users]
