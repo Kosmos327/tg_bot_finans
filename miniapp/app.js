@@ -1,7 +1,6 @@
-/**
- * tg_bot_finans Mini App — app.js
- * Role-based interface for Telegram Mini App
- */
+/* ─────────────────────────────────────────────────────────
+   Финансовый ERP — Telegram Mini App Logic
+   ───────────────────────────────────────────────────────── */
 
 /* =========================================================
    Configuration
@@ -10,915 +9,951 @@ const API_BASE = (window.location.origin.includes('localhost') || window.locatio
   ? 'http://localhost:8000'
   : window.location.origin;
 
-/* =========================================================
-   State
-   ========================================================= */
-const state = {
-  me: null,         // MeResponse from /me
-  deals: [],        // cached deals
-  dashboard: null,  // cached dashboard data
-  journal: [],      // cached journal
-  activeTab: 0,
-  currentFilter: 'all',
-  editDealId: null,
-};
+// ── Mock Data ─────────────────────────────────────────────
 
-/* =========================================================
-   Telegram Web App init
-   ========================================================= */
-const tg = window.Telegram?.WebApp;
-if (tg) {
-  tg.ready();
-  tg.expand();
-}
+const MOCK_DEALS = [
+  {
+    id: 1,
+    title: 'Поставка IT-оборудования',
+    client: 'ООО «Технолайн»',
+    manager: 'Иванов И.И.',
+    manager_id: 1,
+    amount: 850000,
+    status: 'active',
+    stage: 'Переговоры',
+    payment_status: 'partial',
+    paid_amount: 425000,
+    date: '2026-03-10',
+    due_date: '2026-03-28',
+  },
+  {
+    id: 2,
+    title: 'Разработка корпоративного портала',
+    client: 'ЗАО «МедиаГрупп»',
+    manager: 'Петрова А.С.',
+    manager_id: 2,
+    amount: 1200000,
+    status: 'active',
+    stage: 'Коммерческое предложение',
+    payment_status: 'pending',
+    paid_amount: 0,
+    date: '2026-03-08',
+    due_date: '2026-04-15',
+  },
+  {
+    id: 3,
+    title: 'Аутсорсинг бухгалтерии',
+    client: 'ИП Смирнов К.В.',
+    manager: 'Иванов И.И.',
+    manager_id: 1,
+    amount: 240000,
+    status: 'won',
+    stage: 'Закрыто',
+    payment_status: 'paid',
+    paid_amount: 240000,
+    date: '2026-02-20',
+    due_date: '2026-03-01',
+  },
+  {
+    id: 4,
+    title: 'Лицензии ПО Microsoft 365',
+    client: 'АО «Строй Инвест»',
+    manager: 'Козлов М.Р.',
+    manager_id: 3,
+    amount: 390000,
+    status: 'active',
+    stage: 'Согласование договора',
+    payment_status: 'overdue',
+    paid_amount: 0,
+    date: '2026-02-15',
+    due_date: '2026-03-01',
+  },
+  {
+    id: 5,
+    title: 'Техобслуживание серверного зала',
+    client: 'ООО «ЛогистикПро»',
+    manager: 'Петрова А.С.',
+    manager_id: 2,
+    amount: 175000,
+    status: 'active',
+    stage: 'Первичный контакт',
+    payment_status: 'pending',
+    paid_amount: 0,
+    date: '2026-03-12',
+    due_date: '2026-04-10',
+  },
+  {
+    id: 6,
+    title: 'Внедрение CRM системы',
+    client: 'ООО «РетейлМакс»',
+    manager: 'Иванов И.И.',
+    manager_id: 1,
+    amount: 680000,
+    status: 'on_hold',
+    stage: 'Квалификация',
+    payment_status: 'pending',
+    paid_amount: 0,
+    date: '2026-03-05',
+    due_date: '2026-04-30',
+  },
+  {
+    id: 7,
+    title: 'Аудит информационной безопасности',
+    client: 'ПАО «ФинансБанк»',
+    manager: 'Козлов М.Р.',
+    manager_id: 3,
+    amount: 520000,
+    status: 'active',
+    stage: 'Презентация',
+    payment_status: 'partial',
+    paid_amount: 200000,
+    date: '2026-03-01',
+    due_date: '2026-03-20',
+  },
+  {
+    id: 8,
+    title: 'Облачная миграция данных',
+    client: 'ООО «ДатаСервис»',
+    manager: 'Сидорова Н.В.',
+    manager_id: 4,
+    amount: 950000,
+    status: 'new',
+    stage: 'Первичный контакт',
+    payment_status: 'pending',
+    paid_amount: 0,
+    date: '2026-03-11',
+    due_date: '2026-05-01',
+  },
+  {
+    id: 9,
+    title: 'Поддержка 1С:Предприятие',
+    client: 'ИП Новикова О.Д.',
+    manager: 'Сидорова Н.В.',
+    manager_id: 4,
+    amount: 96000,
+    status: 'won',
+    stage: 'Закрыто',
+    payment_status: 'paid',
+    paid_amount: 96000,
+    date: '2026-02-28',
+    due_date: '2026-03-05',
+  },
+  {
+    id: 10,
+    title: 'Разработка мобильного приложения',
+    client: 'ООО «АгроТех»',
+    manager: 'Петрова А.С.',
+    manager_id: 2,
+    amount: 1800000,
+    status: 'lost',
+    stage: 'Проигрыш',
+    payment_status: 'pending',
+    paid_amount: 0,
+    date: '2026-02-10',
+    due_date: '2026-03-10',
+  },
+];
 
-function getInitData() {
-  return tg?.initData || '';
-}
+const MOCK_TEAM = [
+  { id: 1, name: 'Иванов И.И.',    initial: 'И', deals: 8,  won: 3, amount: 1770000, target: 2000000 },
+  { id: 2, name: 'Петрова А.С.',   initial: 'П', deals: 7,  won: 2, amount: 3175000, target: 3500000 },
+  { id: 3, name: 'Козлов М.Р.',    initial: 'К', deals: 6,  won: 4, amount: 910000,  target: 1500000 },
+  { id: 4, name: 'Сидорова Н.В.',  initial: 'С', deals: 5,  won: 3, amount: 1046000, target: 1200000 },
+  { id: 5, name: 'Фёдоров Д.А.',   initial: 'Ф', deals: 4,  won: 1, amount: 340000,  target: 800000 },
+];
 
-/* =========================================================
-   API helpers
-   ========================================================= */
-async function apiFetch(path, options = {}) {
-  const headers = {
-    'Content-Type': 'application/json',
-    'X-Init-Data': getInitData(),
-    ...(options.headers || {}),
-  };
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'Ошибка запроса');
-  }
-  return res.json();
-}
+// ── Role Config ───────────────────────────────────────────
 
-/* =========================================================
-   Toast
-   ========================================================= */
-function showToast(msg, duration = 2500) {
-  const toast = document.getElementById('toast');
-  toast.textContent = msg;
-  toast.classList.remove('hidden');
-  clearTimeout(toast._timer);
-  toast._timer = setTimeout(() => toast.classList.add('hidden'), duration);
-}
-
-/* =========================================================
-   Number formatting
-   ========================================================= */
-function fmtAmount(val) {
-  const n = parseFloat(String(val).replace(',', '.').replace(/\s/g, ''));
-  if (isNaN(n)) return val || '—';
-  return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(n);
-}
-
-function dealRemaining(deal) {
-  const amount = parseFloat(String(deal.amount_with_vat || 0).replace(',', '.'));
-  const paid   = parseFloat(String(deal.paid || 0).replace(',', '.'));
-  return String(Math.max(amount - paid, 0));
-}
-
-function fmtNum(n) {
-  if (n === null || n === undefined) return '—';
-  return new Intl.NumberFormat('ru-RU').format(n);
-}
-
-/* =========================================================
-   Status helpers
-   ========================================================= */
-function statusClass(status) {
-  if (!status) return 'status-other';
-  const s = status.toLowerCase();
-  if (s.includes('новая') || s.includes('новый')) return 'status-new';
-  if (s.includes('завершен') || s.includes('закрыт')) return 'status-completed';
-  if (s.includes('работ') || s.includes('актив')) return 'status-inprogress';
-  return 'status-other';
-}
-
-function paymentStatus(deal) {
-  const amount = parseFloat(String(deal.amount_with_vat || 0).replace(',', '.'));
-  const paid   = parseFloat(String(deal.paid || 0).replace(',', '.'));
-  if (paid <= 0)       return { label: 'Не оплачено',      cls: 'pay-unpaid' };
-  if (paid < amount)   return { label: 'Частично оплачено', cls: 'pay-partial' };
-  return               { label: 'Оплачено',               cls: 'pay-paid' };
-}
-
-/* =========================================================
-   Role config
-   ========================================================= */
-const ROLE_CONFIG = {
+const ROLES = {
   manager: {
-    label: 'Менеджер',
-    accent: 'role-manager',
-    tabs: ['Мои сделки', 'Новая сделка', 'Мои показатели'],
-    actions: [
-      { icon: '➕', label: 'Новая сделка',   tab: 1 },
-      { icon: '📂', label: 'Мои сделки',    tab: 0 },
-      { icon: '🔍', label: 'Поиск сделки',  tab: 0 },
-      { icon: '📊', label: 'Мои показатели', tab: 2 },
+    id: 'manager',
+    cssClass: 'role-manager',
+    name: 'Менеджер',
+    badgeLabel: 'Менеджер по продажам',
+    icon: '👤',
+    navItems: [
+      { icon: '🏠', label: 'Главная',  tab: 'dashboard' },
+      { icon: '💼', label: 'Сделки',   tab: 'deals' },
+      { icon: '✅', label: 'Задачи',   tab: 'tasks' },
+      { icon: '👤', label: 'Профиль',  tab: 'profile' },
     ],
+    tabs: ['Мои сделки', 'Задачи'],
+    filters: ['all', 'active', 'won', 'lost', 'on_hold'],
+    filterLabels: { all: 'Все', active: 'В работе', won: 'Выиграно', lost: 'Проиграно', on_hold: 'На паузе' },
   },
   accountant: {
-    label: 'Бухгалтер',
-    accent: 'role-accountant',
-    tabs: ['Сделки', 'Оплаты', 'Расходы', 'Журнал'],
-    actions: [
-      { icon: '💳', label: 'Оплаты',            tab: 1 },
-      { icon: '🧾', label: 'Закрытие сделки',   tab: 0 },
-      { icon: '📂', label: 'Все сделки',         tab: 0 },
-      { icon: '📜', label: 'Журнал действий',    tab: 3 },
+    id: 'accountant',
+    cssClass: 'role-accountant',
+    name: 'Бухгалтер',
+    badgeLabel: 'Бухгалтер',
+    icon: '📊',
+    navItems: [
+      { icon: '🏠', label: 'Главная',  tab: 'dashboard' },
+      { icon: '💳', label: 'Платежи',  tab: 'payments' },
+      { icon: '📋', label: 'Счета',    tab: 'invoices' },
+      { icon: '📈', label: 'Отчёты',   tab: 'reports' },
     ],
+    tabs: ['Платежи', 'Счета', 'Отчёты'],
+    filters: ['all', 'pending', 'partial', 'overdue', 'paid'],
+    filterLabels: { all: 'Все', pending: 'Ожидает', partial: 'Частично', overdue: 'Просрочено', paid: 'Оплачено' },
   },
-  operations_director: {
-    label: 'Операционный директор',
-    accent: 'role-operations_director',
-    tabs: ['Дашборд', 'Сделки', 'Аналитика', 'Команда', 'Журнал'],
-    actions: [
-      { icon: '📊', label: 'Общий дашборд',     tab: 0 },
-      { icon: '📂', label: 'Все сделки',         tab: 1 },
-      { icon: '🧾', label: 'Финансы',            tab: 2 },
-      { icon: '📜', label: 'Журнал действий',    tab: 4 },
-      { icon: '👥', label: 'По менеджерам',      tab: 3 },
+  opdir: {
+    id: 'opdir',
+    cssClass: 'role-opdir',
+    name: 'Оп. директор',
+    badgeLabel: 'Операционный директор',
+    icon: '🏢',
+    navItems: [
+      { icon: '🏠', label: 'Главная',  tab: 'dashboard' },
+      { icon: '💼', label: 'Сделки',   tab: 'deals' },
+      { icon: '👥', label: 'Команда',  tab: 'team' },
+      { icon: '📈', label: 'Аналитика',tab: 'analytics' },
     ],
+    tabs: ['Все сделки', 'Менеджеры', 'Аналитика'],
+    filters: ['all', 'new', 'active', 'won', 'lost'],
+    filterLabels: { all: 'Все', new: 'Новые', active: 'В работе', won: 'Закрыто', lost: 'Потеряно' },
   },
-  head_of_sales: {
-    label: 'РОП',
-    accent: 'role-head_of_sales',
-    tabs: ['Команда', 'Сделки', 'Воронка', 'KPI', 'Аналитика'],
-    actions: [
-      { icon: '👥', label: 'Команда',            tab: 0 },
-      { icon: '📂', label: 'Все сделки',         tab: 1 },
-      { icon: '📈', label: 'Воронка',            tab: 2 },
-      { icon: '🔎', label: 'Контроль менеджеров', tab: 0 },
+  rop: {
+    id: 'rop',
+    cssClass: 'role-rop',
+    name: 'РОП',
+    badgeLabel: 'Руководитель отдела продаж',
+    icon: '🎯',
+    navItems: [
+      { icon: '🏠', label: 'Главная',  tab: 'dashboard' },
+      { icon: '💼', label: 'Сделки',   tab: 'deals' },
+      { icon: '👥', label: 'Команда',  tab: 'team' },
+      { icon: '🎯', label: 'Планы',    tab: 'goals' },
     ],
+    tabs: ['Все сделки', 'Команда', 'Планы'],
+    filters: ['all', 'active', 'won', 'new', 'lost'],
+    filterLabels: { all: 'Все', active: 'В работе', won: 'Выиграно', new: 'Новые', lost: 'Проиграно' },
   },
 };
 
-/* =========================================================
-   Field labels
-   ========================================================= */
-const FIELD_LABELS = {
-  status:         'Статус',
-  direction:      'Направление бизнеса',
-  client:         'Клиент',
-  manager:        'Менеджер',
-  amount_with_vat:'Начислено с НДС',
-  has_vat:        'Наличие НДС',
-  paid:           'Оплачено',
-  date_start:     'Дата начала',
-  date_end:       'Дата окончания',
-  act_date:       'Дата выставления акта',
-  var_exp1:       'Переменный расход 1',
-  var_exp2:       'Переменный расход 2',
-  bonus_pct:      'Бонус менеджера %',
-  bonus_paid:     'Бонус менеджера выплачено',
-  prod_exp:       'Общепроизводственный расход',
-  source:         'Источник',
-  document:       'Документ/ссылка',
-  comment:        'Комментарий',
-  creator_tg_id:  'ID создателя',
+// ── Status / Payment helpers ──────────────────────────────
+
+const STATUS_MAP = {
+  new:      { label: 'Новая',       cls: 'deal-status-badge--new',    dot: '●' },
+  active:   { label: 'В работе',    cls: 'deal-status-badge--active',  dot: '●' },
+  won:      { label: 'Выиграно',    cls: 'deal-status-badge--won',     dot: '✔' },
+  lost:     { label: 'Проиграно',   cls: 'deal-status-badge--lost',    dot: '✕' },
+  on_hold:  { label: 'На паузе',    cls: 'deal-status-badge--hold',    dot: '⏸' },
 };
 
-const ALL_DEAL_FIELDS = Object.keys(FIELD_LABELS).filter(f => f !== 'creator_tg_id');
+const PAYMENT_MAP = {
+  pending:  { label: 'Ожидает',       cls: 'deal-payment-badge--pending' },
+  partial:  { label: 'Частично',      cls: 'deal-payment-badge--partial' },
+  paid:     { label: 'Оплачено',      cls: 'deal-payment-badge--paid' },
+  overdue:  { label: 'Просрочено',    cls: 'deal-payment-badge--overdue' },
+};
 
-/* =========================================================
-   App bootstrap
-   ========================================================= */
-async function init() {
-  try {
-    state.me = await apiFetch('/me');
-    setupApp();
-    await loadDashboard();
-  } catch (e) {
-    showNoAccess();
-  }
+// ── App State ─────────────────────────────────────────────
+
+const State = {
+  role: null,
+  userName: 'Пользователь',
+  userInitial: 'П',
+  activeTab: 0,
+  activeFilter: 'all',
+  activeNav: 0,
+  deals: MOCK_DEALS,
+};
+
+// ── Utilities ─────────────────────────────────────────────
+
+function fmt(n) {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace('.', ',') + ' млн ₽';
+  if (n >= 1_000)     return (n / 1_000).toFixed(0) + ' тыс. ₽';
+  return n.toLocaleString('ru-RU') + ' ₽';
 }
 
-function showNoAccess() {
-  document.getElementById('loading-screen').classList.add('hidden');
-  document.getElementById('no-access-screen').classList.remove('hidden');
+function fmtShort(n) {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace('.', ',') + 'M';
+  if (n >= 1_000)     return Math.round(n / 1_000) + 'K';
+  return String(n);
 }
 
-function setupApp() {
-  const me = state.me;
-  document.getElementById('loading-screen').classList.add('hidden');
+function fmtDate(dateStr) {
+  const d = new Date(dateStr);
+  const months = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+  return d.getDate() + ' ' + months[d.getMonth()];
+}
 
-  if (!me.active || me.role === 'no_access') {
-    showNoAccess();
-    return;
-  }
+function pct(part, total) {
+  if (!total) return 0;
+  return Math.round((part / total) * 100);
+}
 
-  const app = document.getElementById('app');
-  const cfg = ROLE_CONFIG[me.role] || {};
+function el(tag, cls, html) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html;
+  return e;
+}
 
-  // Apply role accent class
-  app.className = cfg.accent || '';
-  app.classList.remove('hidden');
+function svgIcon(path, size = 12) {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
+}
 
-  // Header
-  const initials = (me.full_name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-  document.getElementById('user-avatar').textContent = initials;
-  document.getElementById('user-name').textContent = me.full_name || 'Пользователь';
-  document.getElementById('role-badge').textContent = me.role_label_ru || me.role;
+// ── Component Renderers ───────────────────────────────────
+
+function renderKpiCard({ value, label, trend, trendDir }) {
+  const trendClass = trendDir === 'up' ? 'kpi-card__trend--up' : trendDir === 'down' ? 'kpi-card__trend--down' : 'kpi-card__trend--warn';
+  const trendArrow = trendDir === 'up' ? '↑' : trendDir === 'down' ? '↓' : '→';
+  return `
+    <div class="kpi-card">
+      <div class="kpi-card__value">${value}</div>
+      <div class="kpi-card__label">${label}</div>
+      ${trend ? `<div class="kpi-card__trend ${trendClass}">${trendArrow} ${trend}</div>` : ''}
+    </div>`;
+}
+
+function renderDealCard(deal, showManager = false) {
+  const st = STATUS_MAP[deal.status] || STATUS_MAP.new;
+  const pay = PAYMENT_MAP[deal.payment_status] || PAYMENT_MAP.pending;
+  const payPct = pct(deal.paid_amount, deal.amount);
+  const fillCls = deal.payment_status === 'paid' ? 'progress-bar__fill--paid'
+                : deal.payment_status === 'overdue' ? 'progress-bar__fill--overdue'
+                : 'progress-bar__fill--partial';
+
+  const managerHtml = showManager
+    ? `<span class="deal-meta__item">${svgIcon('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>')} ${deal.manager}</span>`
+    : '';
+
+  return `
+    <div class="deal-card" data-id="${deal.id}">
+      <div class="deal-card__top">
+        <div>
+          <div class="deal-card__title">${deal.title}</div>
+          <div class="deal-card__stage">${deal.stage}</div>
+        </div>
+        <span class="deal-status-badge ${st.cls}">${st.dot} ${st.label}</span>
+      </div>
+      <div class="deal-card__middle">
+        <div class="deal-amount">
+          <div class="deal-amount__value">${fmt(deal.amount)}</div>
+          <div class="deal-amount__label">Сумма сделки</div>
+        </div>
+        <div class="deal-payment">
+          <span class="deal-payment-badge ${pay.cls}">${pay.label}</span>
+          <div class="deal-payment__progress">
+            <div class="progress-bar" style="width:80px">
+              <div class="progress-bar__fill ${fillCls}" style="width:${payPct}%"></div>
+            </div>
+            <span class="progress-pct">${payPct}%</span>
+          </div>
+        </div>
+      </div>
+      <div class="deal-card__bottom">
+        <div class="deal-meta">
+          <span class="deal-meta__item">${svgIcon('<path d="M20 7H4a2 2 0 0 0-2 2v6c0 1.1.9 2 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><polyline points="16 3 12 7 8 3"/>')} ${deal.client}</span>
+          ${managerHtml}
+        </div>
+        <span class="deal-date">${fmtDate(deal.date)}</span>
+      </div>
+    </div>`;
+}
+
+function renderEmptyState(icon, title, sub, btnLabel, btnAction) {
+  return `
+    <div class="empty-state">
+      <div class="empty-state__icon">${icon}</div>
+      <div class="empty-state__title">${title}</div>
+      <div class="empty-state__sub">${sub}</div>
+      ${btnLabel ? `<button class="empty-state__btn" onclick="${btnAction}">${btnLabel}</button>` : ''}
+    </div>`;
+}
+
+function renderFilterRow(filters, filterLabels, active) {
+  return filters.map(f =>
+    `<button class="chip ${active === f ? 'active' : ''}" data-filter="${f}">${filterLabels[f]}</button>`
+  ).join('');
+}
+
+// ── KPI Calculations ──────────────────────────────────────
+
+function calcManagerKPIs(deals, managerId) {
+  const my = deals.filter(d => d.manager_id === managerId);
+  const won = my.filter(d => d.status === 'won');
+  const total = my.reduce((s, d) => s + d.amount, 0);
+  const conv = my.length ? Math.round((won.length / my.length) * 100) : 0;
+  return [
+    { value: String(my.length),       label: 'Мои сделки',    trend: '+2 за месяц', trendDir: 'up' },
+    { value: fmtShort(total) + ' ₽',  label: 'В пайплайне',   trend: null },
+    { value: String(won.length),       label: 'Закрыто',       trend: 'в этом месяце', trendDir: 'up' },
+    { value: conv + '%',               label: 'Конверсия',     trend: conv > 35 ? 'хороший' : 'нужно выше', trendDir: conv > 35 ? 'up' : 'warn' },
+  ];
+}
+
+function calcAccountantKPIs(deals) {
+  const pending   = deals.filter(d => d.payment_status === 'pending').reduce((s, d) => s + d.amount, 0);
+  const overdue   = deals.filter(d => d.payment_status === 'overdue').reduce((s, d) => s + d.amount, 0);
+  const paid      = deals.filter(d => d.payment_status === 'paid').reduce((s, d) => s + d.amount, 0);
+  const partial   = deals.filter(d => d.payment_status === 'partial').reduce((s, d) => s + (d.amount - d.paid_amount), 0);
+  const debit     = pending + partial;
+  return [
+    { value: fmtShort(pending) + ' ₽',  label: 'К оплате',      trend: null },
+    { value: fmtShort(overdue) + ' ₽',  label: 'Просрочено',     trend: overdue > 0 ? String(deals.filter(d => d.payment_status === 'overdue').length) + ' сделок' : 'Нет', trendDir: overdue > 0 ? 'down' : 'up' },
+    { value: fmtShort(paid) + ' ₽',     label: 'Оплачено',       trend: 'за месяц', trendDir: 'up' },
+    { value: fmtShort(debit) + ' ₽',    label: 'Дебиторка',      trend: null },
+  ];
+}
+
+function calcOpDirKPIs(deals) {
+  const total  = deals.length;
+  const won    = deals.filter(d => d.status === 'won');
+  const rev    = won.reduce((s, d) => s + d.amount, 0);
+  const conv   = total ? Math.round((won.length / total) * 100) : 0;
+  const newD   = deals.filter(d => d.status === 'new').length;
+  return [
+    { value: String(total),             label: 'Всего сделок',   trend: '+' + newD + ' новых', trendDir: 'up' },
+    { value: fmtShort(rev) + ' ₽',     label: 'Выручка',        trend: 'за месяц', trendDir: 'up' },
+    { value: conv + '%',                label: 'Конверсия',      trend: null },
+    { value: String(newD),              label: 'Новых сделок',   trend: 'за 7 дней', trendDir: newD > 2 ? 'up' : 'warn' },
+  ];
+}
+
+function calcRopKPIs() {
+  const teamSize    = MOCK_TEAM.length;
+  const totalRev    = MOCK_TEAM.reduce((s, t) => s + t.amount, 0);
+  const totalTarget = MOCK_TEAM.reduce((s, t) => s + t.target, 0);
+  const targetPct   = Math.round((totalRev / totalTarget) * 100);
+  const totalWon    = MOCK_TEAM.reduce((s, t) => s + t.won, 0);
+  const totalDeals  = MOCK_TEAM.reduce((s, t) => s + t.deals, 0);
+  const winRate     = Math.round((totalWon / totalDeals) * 100);
+  return [
+    { value: String(teamSize),          label: 'Менеджеров',    trend: 'в команде', trendDir: 'up' },
+    { value: fmtShort(totalRev) + ' ₽', label: 'Выручка',       trend: targetPct + '% от плана', trendDir: targetPct >= 70 ? 'up' : 'warn' },
+    { value: String(totalWon),          label: 'Закрыто',       trend: 'сделок', trendDir: 'up' },
+    { value: winRate + '%',             label: 'Win Rate',       trend: winRate > 35 ? 'выше нормы' : 'ниже цели', trendDir: winRate > 35 ? 'up' : 'warn' },
+  ];
+}
+
+// ── Dashboard Renderers ───────────────────────────────────
+
+function buildManagerDashboard() {
+  const managerId = 1; // current user (Иванов)
+  const myDeals = State.deals.filter(d => d.manager_id === managerId);
+  const filtered = State.activeFilter === 'all' ? myDeals : myDeals.filter(d => d.status === State.activeFilter);
+  const roleConf = ROLES.manager;
+  const tab = State.activeTab;
+
+  // KPI
+  const kpis = calcManagerKPIs(State.deals, managerId);
+  renderKpiSummary(kpis);
 
   // Tabs
-  renderTabs(cfg.tabs || []);
+  renderTabBar(roleConf.tabs);
 
-  // Actions
-  renderActions(cfg.actions || []);
+  // Nav
+  renderBottomNav(roleConf.navItems);
 
-  // Refresh button
-  document.getElementById('refresh-btn').addEventListener('click', async () => {
-    showToast('Обновление…');
-    await loadDashboard();
-  });
+  // Sticky actions
+  showStickyActions([
+    { label: '+ Новая сделка', cls: 'action-btn--primary', action: 'App.noop()' },
+  ]);
+
+  const content = document.getElementById('app-content');
+
+  if (tab === 0) {
+    // Summary stats row
+    const won   = myDeals.filter(d => d.status === 'won').length;
+    const total = myDeals.reduce((s, d) => s + d.amount, 0);
+
+    const statsHtml = `
+      <div class="stats-row fade-in-up">
+        <div class="stats-cell">
+          <div class="stats-cell__value">${myDeals.length}</div>
+          <div class="stats-cell__label">Мои сделки</div>
+        </div>
+        <div class="stats-cell">
+          <div class="stats-cell__value">${won}</div>
+          <div class="stats-cell__label">Закрыто</div>
+        </div>
+        <div class="stats-cell">
+          <div class="stats-cell__value">${fmtShort(total)}₽</div>
+          <div class="stats-cell__label">Пайплайн</div>
+        </div>
+      </div>`;
+
+    const dealsHtml = filtered.length > 0
+      ? filtered.map(d => renderDealCard(d, false)).join('')
+      : renderEmptyState('💼', 'Нет сделок', 'Сделки с выбранным статусом не найдены.', 'Создать сделку', 'App.noop()');
+
+    content.innerHTML = `
+      ${statsHtml}
+      <div class="section-card fade-in-up fade-in-up--1">
+        <div class="section-header">
+          <span class="section-title">Мои сделки</span>
+          <span class="section-count">${filtered.length}</span>
+        </div>
+        <div class="filter-row">${renderFilterRow(roleConf.filters, roleConf.filterLabels, State.activeFilter)}</div>
+        <div class="deal-list">${dealsHtml}</div>
+      </div>`;
+
+  } else if (tab === 1) {
+    content.innerHTML = `
+      <div class="section-card fade-in-up">
+        <div class="section-header"><span class="section-title">Задачи на сегодня</span><span class="section-count">0</span></div>
+        ${renderEmptyState('✅', 'Задач нет', 'Все задачи выполнены или ещё не назначены.', null, null)}
+      </div>`;
+  }
+
+  bindFilters();
 }
 
-/* =========================================================
-   Tabs
-   ========================================================= */
-function renderTabs(tabs) {
+function buildAccountantDashboard() {
+  const deals = State.deals;
+  const filtered = State.activeFilter === 'all'
+    ? deals
+    : deals.filter(d => d.payment_status === State.activeFilter);
+  const roleConf = ROLES.accountant;
+  const tab = State.activeTab;
+
+  const kpis = calcAccountantKPIs(deals);
+  renderKpiSummary(kpis);
+  renderTabBar(roleConf.tabs);
+  renderBottomNav(roleConf.navItems);
+  showStickyActions([
+    { label: '+ Создать счёт', cls: 'action-btn--primary', action: 'App.noop()' },
+    { label: 'Экспорт',        cls: 'action-btn--secondary', action: 'App.noop()' },
+  ]);
+
+  const content = document.getElementById('app-content');
+  const overdueDeals = deals.filter(d => d.payment_status === 'overdue');
+  const pendingDeals = deals.filter(d => d.payment_status === 'pending');
+
+  const alertHtml = overdueDeals.length > 0
+    ? `<div class="alert-banner fade-in-up">
+        <div class="alert-banner__icon">⚠️</div>
+        <div class="alert-banner__text">
+          <div class="alert-banner__title">Просроченных платежей: ${overdueDeals.length}</div>
+          Необходимо срочно связаться с клиентами или инициировать претензионную работу.
+        </div>
+      </div>` : '';
+
+  if (tab === 0) {
+    // Payment tab
+    const pendingTotal  = pendingDeals.reduce((s, d) => s + d.amount, 0);
+    const overdueTotal  = overdueDeals.reduce((s, d) => s + d.amount, 0);
+    const paidTotal     = deals.filter(d => d.payment_status === 'paid').reduce((s, d) => s + d.amount, 0);
+    const partialTotal  = deals.filter(d => d.payment_status === 'partial').reduce((s, d) => s + (d.amount - d.paid_amount), 0);
+
+    const dealsHtml = filtered.length > 0
+      ? filtered.map(d => renderDealCard(d, true)).join('')
+      : renderEmptyState('💳', 'Нет платежей', 'Платежей с выбранным статусом не найдено.', null, null);
+
+    content.innerHTML = `
+      ${alertHtml}
+      <div class="section-card fade-in-up fade-in-up--1">
+        <div class="section-header"><span class="section-title">Сводка</span></div>
+        <div class="info-row"><span class="info-row__label">Ожидает оплаты</span><span class="info-row__value">${fmt(pendingTotal)}</span></div>
+        <div class="info-row"><span class="info-row__label">Просрочено</span><span class="info-row__value info-row__value--warn">${fmt(overdueTotal)}</span></div>
+        <div class="info-row"><span class="info-row__label">Оплачено за месяц</span><span class="info-row__value info-row__value--ok">${fmt(paidTotal)}</span></div>
+        <div class="info-row"><span class="info-row__label">Остаток дебиторки</span><span class="info-row__value info-row__value--accent">${fmt(partialTotal)}</span></div>
+      </div>
+      <div class="section-card fade-in-up fade-in-up--2">
+        <div class="section-header">
+          <span class="section-title">Платежи</span>
+          <span class="section-count">${filtered.length}</span>
+        </div>
+        <div class="filter-row">${renderFilterRow(roleConf.filters, roleConf.filterLabels, State.activeFilter)}</div>
+        <div class="deal-list">${dealsHtml}</div>
+      </div>`;
+
+  } else if (tab === 1) {
+    content.innerHTML = `
+      <div class="section-card fade-in-up">
+        <div class="section-header"><span class="section-title">Счета</span><span class="section-count">0</span></div>
+        ${renderEmptyState('📋', 'Нет счетов', 'Выставленных счетов пока нет. Создайте первый счёт.', '+ Создать счёт', 'App.noop()')}
+      </div>`;
+  } else if (tab === 2) {
+    content.innerHTML = `
+      <div class="section-card fade-in-up">
+        <div class="section-header"><span class="section-title">Отчёты</span></div>
+        ${renderEmptyState('📈', 'Нет данных', 'Аналитические отчёты появятся после накопления данных.', null, null)}
+      </div>`;
+  }
+
+  bindFilters();
+}
+
+function buildOpDirDashboard() {
+  const deals = State.deals;
+  const filtered = State.activeFilter === 'all'
+    ? deals
+    : deals.filter(d => d.status === State.activeFilter);
+  const roleConf = ROLES.opdir;
+  const tab = State.activeTab;
+
+  const kpis = calcOpDirKPIs(deals);
+  renderKpiSummary(kpis);
+  renderTabBar(roleConf.tabs);
+  renderBottomNav(roleConf.navItems);
+  hideStickyActions();
+
+  const content = document.getElementById('app-content');
+
+  if (tab === 0) {
+    const activeDeals = deals.filter(d => d.status === 'active').length;
+    const wonDeals    = deals.filter(d => d.status === 'won').length;
+    const lostDeals   = deals.filter(d => d.status === 'lost').length;
+
+    const statsHtml = `
+      <div class="stats-row fade-in-up">
+        <div class="stats-cell">
+          <div class="stats-cell__value">${activeDeals}</div>
+          <div class="stats-cell__label">В работе</div>
+        </div>
+        <div class="stats-cell">
+          <div class="stats-cell__value">${wonDeals}</div>
+          <div class="stats-cell__label">Закрыто</div>
+        </div>
+        <div class="stats-cell">
+          <div class="stats-cell__value">${lostDeals}</div>
+          <div class="stats-cell__label">Потеряно</div>
+        </div>
+      </div>`;
+
+    const dealsHtml = filtered.length > 0
+      ? filtered.map(d => renderDealCard(d, true)).join('')
+      : renderEmptyState('💼', 'Нет сделок', 'Сделки с выбранным статусом не найдены.', null, null);
+
+    content.innerHTML = `
+      ${statsHtml}
+      <div class="section-card fade-in-up fade-in-up--1">
+        <div class="section-header">
+          <span class="section-title">Все сделки</span>
+          <span class="section-count">${filtered.length}</span>
+        </div>
+        <div class="filter-row">${renderFilterRow(roleConf.filters, roleConf.filterLabels, State.activeFilter)}</div>
+        <div class="deal-list">${dealsHtml}</div>
+      </div>`;
+
+  } else if (tab === 1) {
+    const teamHtml = MOCK_TEAM.map(member => `
+      <div class="team-card">
+        <div class="team-avatar">${member.initial}</div>
+        <div class="team-info">
+          <div class="team-name">${member.name}</div>
+          <div class="team-stats">${member.deals} сделок · ${member.won} закрыто</div>
+        </div>
+        <div class="team-kpi">
+          <div class="team-kpi__value">${fmtShort(member.amount)}₽</div>
+          <div class="team-kpi__label">${pct(member.amount, member.target)}% плана</div>
+        </div>
+      </div>`).join('');
+
+    content.innerHTML = `
+      <div class="section-card fade-in-up">
+        <div class="section-header"><span class="section-title">Менеджеры</span><span class="section-count">${MOCK_TEAM.length}</span></div>
+        ${teamHtml}
+      </div>`;
+
+  } else if (tab === 2) {
+    const totalPipeline = deals.filter(d => d.status === 'active' || d.status === 'new').reduce((s, d) => s + d.amount, 0);
+    const totalWon      = deals.filter(d => d.status === 'won').reduce((s, d) => s + d.amount, 0);
+    const avgDeal       = deals.length ? Math.round(deals.reduce((s, d) => s + d.amount, 0) / deals.length) : 0;
+
+    content.innerHTML = `
+      <div class="section-card fade-in-up">
+        <div class="section-header"><span class="section-title">Аналитика</span></div>
+        <div class="info-row"><span class="info-row__label">Пайплайн (активные)</span><span class="info-row__value info-row__value--accent">${fmt(totalPipeline)}</span></div>
+        <div class="info-row"><span class="info-row__label">Выиграно за период</span><span class="info-row__value info-row__value--ok">${fmt(totalWon)}</span></div>
+        <div class="info-row"><span class="info-row__label">Средняя сумма сделки</span><span class="info-row__value">${fmt(avgDeal)}</span></div>
+        <div class="info-row"><span class="info-row__label">Всего сделок</span><span class="info-row__value">${deals.length}</span></div>
+        <div class="info-row"><span class="info-row__label">Менеджеров в команде</span><span class="info-row__value">${MOCK_TEAM.length}</span></div>
+      </div>`;
+  }
+
+  bindFilters();
+}
+
+function buildRopDashboard() {
+  const deals = State.deals;
+  const filtered = State.activeFilter === 'all'
+    ? deals
+    : deals.filter(d => d.status === State.activeFilter);
+  const roleConf = ROLES.rop;
+  const tab = State.activeTab;
+
+  const kpis = calcRopKPIs();
+  renderKpiSummary(kpis);
+  renderTabBar(roleConf.tabs);
+  renderBottomNav(roleConf.navItems);
+  showStickyActions([
+    { label: '+ Задача команде', cls: 'action-btn--primary', action: 'App.noop()' },
+    { label: 'Отчёт',            cls: 'action-btn--secondary', action: 'App.noop()' },
+  ]);
+
+  const content = document.getElementById('app-content');
+
+  if (tab === 0) {
+    const won    = deals.filter(d => d.status === 'won').length;
+    const active = deals.filter(d => d.status === 'active').length;
+    const total  = deals.reduce((s, d) => s + d.amount, 0);
+
+    const statsHtml = `
+      <div class="stats-row fade-in-up">
+        <div class="stats-cell">
+          <div class="stats-cell__value">${deals.length}</div>
+          <div class="stats-cell__label">Все сделки</div>
+        </div>
+        <div class="stats-cell">
+          <div class="stats-cell__value">${active}</div>
+          <div class="stats-cell__label">Активных</div>
+        </div>
+        <div class="stats-cell">
+          <div class="stats-cell__value">${won}</div>
+          <div class="stats-cell__label">Закрыто</div>
+        </div>
+      </div>`;
+
+    const dealsHtml = filtered.length > 0
+      ? filtered.map(d => renderDealCard(d, true)).join('')
+      : renderEmptyState('🎯', 'Нет сделок', 'Сделки с выбранным статусом не найдены.', null, null);
+
+    content.innerHTML = `
+      ${statsHtml}
+      <div class="section-card fade-in-up fade-in-up--1">
+        <div class="section-header">
+          <span class="section-title">Сделки команды</span>
+          <span class="section-count">${filtered.length}</span>
+        </div>
+        <div class="filter-row">${renderFilterRow(roleConf.filters, roleConf.filterLabels, State.activeFilter)}</div>
+        <div class="deal-list">${dealsHtml}</div>
+      </div>`;
+
+  } else if (tab === 1) {
+    const teamHtml = MOCK_TEAM.map(member => {
+      const tPct = pct(member.amount, member.target);
+      const fillCls = tPct >= 80 ? 'goal-bar__fill--ok' : tPct >= 50 ? '' : 'goal-bar__fill--warn';
+      return `
+        <div class="team-card">
+          <div class="team-avatar">${member.initial}</div>
+          <div class="team-info">
+            <div class="team-name">${member.name}</div>
+            <div class="team-stats">${member.deals} сделок · Win Rate ${pct(member.won, member.deals)}%</div>
+            <div class="goal-bar" style="margin-top:6px">
+              <div class="goal-bar__fill ${fillCls}" style="width:${tPct}%"></div>
+            </div>
+          </div>
+          <div class="team-kpi">
+            <div class="team-kpi__value">${tPct}%</div>
+            <div class="team-kpi__label">плана</div>
+          </div>
+        </div>`;
+    }).join('');
+
+    content.innerHTML = `
+      <div class="section-card fade-in-up">
+        <div class="section-header"><span class="section-title">Команда</span><span class="section-count">${MOCK_TEAM.length}</span></div>
+        ${teamHtml}
+      </div>`;
+
+  } else if (tab === 2) {
+    const goalsHtml = MOCK_TEAM.map(member => {
+      const tPct = pct(member.amount, member.target);
+      const fillCls = tPct >= 80 ? 'goal-bar__fill--ok' : tPct >= 50 ? '' : 'goal-bar__fill--warn';
+      return `
+        <div class="goal-bar-wrap">
+          <div class="goal-bar-header">
+            <span class="goal-bar-title">${member.name}</span>
+            <span class="goal-bar-pct">${tPct}%</span>
+          </div>
+          <div class="goal-bar">
+            <div class="goal-bar__fill ${fillCls}" style="width:${tPct}%"></div>
+          </div>
+          <div class="goal-bar-sub">${fmt(member.amount)} из ${fmt(member.target)}</div>
+        </div>`;
+    }).join('');
+
+    const totalRev = MOCK_TEAM.reduce((s, t) => s + t.amount, 0);
+    const totalTgt = MOCK_TEAM.reduce((s, t) => s + t.target, 0);
+    const overallPct = pct(totalRev, totalTgt);
+
+    content.innerHTML = `
+      <div class="section-card fade-in-up">
+        <div class="section-header">
+          <span class="section-title">Выполнение плана</span>
+          <span class="section-count">${overallPct}%</span>
+        </div>
+        ${goalsHtml}
+      </div>`;
+  }
+
+  bindFilters();
+}
+
+// ── UI Helpers ────────────────────────────────────────────
+
+function renderKpiSummary(kpis) {
+  const el = document.getElementById('kpi-summary');
+  el.innerHTML = kpis.map(k => renderKpiCard(k)).join('');
+}
+
+function renderTabBar(tabs) {
   const bar = document.getElementById('tab-bar');
-  bar.innerHTML = '';
-  tabs.forEach((label, i) => {
-    const btn = document.createElement('button');
-    btn.className = 'tab-item' + (i === 0 ? ' active' : '');
-    btn.textContent = label;
-    btn.addEventListener('click', () => switchTab(i));
-    bar.appendChild(btn);
-  });
-}
-
-function switchTab(index) {
-  state.activeTab = index;
-  document.querySelectorAll('.tab-item').forEach((t, i) => {
-    t.classList.toggle('active', i === index);
-  });
-  renderTabContent();
-}
-
-/* =========================================================
-   Actions
-   ========================================================= */
-function renderActions(actions) {
-  const section = document.getElementById('actions-section');
-  section.innerHTML = '';
-  actions.forEach(a => {
-    const btn = document.createElement('button');
-    btn.className = 'action-tile';
-    btn.innerHTML = `<span class="tile-icon">${a.icon}</span><span class="tile-label">${a.label}</span>`;
-    btn.addEventListener('click', () => switchTab(a.tab));
-    section.appendChild(btn);
-  });
-}
-
-/* =========================================================
-   Dashboard load
-   ========================================================= */
-async function loadDashboard() {
-  renderKPISkeletons();
-  renderTabSkeletons();
-  try {
-    const res = await apiFetch('/dashboard');
-    state.dashboard = res.data;
-    state.deals = res.data.deals || [];
-
-    renderKPIs(res.role, res.data);
-    renderTabContent();
-  } catch (e) {
-    showToast('Ошибка загрузки: ' + e.message);
-  }
-}
-
-/* =========================================================
-   KPI Cards
-   ========================================================= */
-function renderKPISkeletons() {
-  const section = document.getElementById('kpi-section');
-  section.innerHTML = Array(4).fill('<div class="skeleton skeleton-card"></div>').join('');
-}
-
-function renderKPIs(role, data) {
-  const section = document.getElementById('kpi-section');
-  section.innerHTML = '';
-
-  const cards = buildKPICards(role, data);
-  cards.forEach((card, i) => {
-    const el = document.createElement('div');
-    el.className = 'kpi-card' + (i === 0 ? ' accent' : '');
-    el.innerHTML = `
-      <div class="kpi-icon">${card.icon}</div>
-      <div class="kpi-value">${card.value}</div>
-      <div class="kpi-label">${card.label}</div>
-    `;
-    section.appendChild(el);
-  });
-}
-
-function buildKPICards(role, d) {
-  switch (role) {
-    case 'manager':
-      return [
-        { icon: '📁', label: 'Мои сделки',           value: fmtNum(d.total_my_deals) },
-        { icon: '🔄', label: 'В работе',              value: fmtNum(d.in_progress) },
-        { icon: '✅', label: 'Завершено',             value: fmtNum(d.completed) },
-        { icon: '💰', label: 'Сумма начислений',      value: fmtAmount(d.total_amount) },
-      ];
-    case 'accountant':
-      return [
-        { icon: '⏳', label: 'Ожидают оплаты',       value: fmtNum(d.awaiting_payment) },
-        { icon: '🔶', label: 'Частично оплачено',     value: fmtNum(d.partially_paid) },
-        { icon: '✅', label: 'Полностью оплачено',    value: fmtNum(d.fully_paid) },
-        { icon: '💸', label: 'Сумма к получению',     value: fmtAmount(d.total_receivable) },
-        { icon: '💰', label: 'Сумма оплачено',        value: fmtAmount(d.total_paid) },
-      ];
-    case 'operations_director':
-      return [
-        { icon: '📁', label: 'Все сделки',            value: fmtNum(d.total_deals) },
-        { icon: '🔄', label: 'Активные',              value: fmtNum(d.active_deals) },
-        { icon: '💰', label: 'Общая сумма начислений',value: fmtAmount(d.total_amount) },
-        { icon: '💳', label: 'Оплачено',              value: fmtAmount(d.total_paid) },
-        { icon: '📊', label: 'Дебиторка',             value: fmtAmount(d.receivable) },
-        { icon: '💼', label: 'Общие расходы',         value: fmtAmount(d.total_expenses) },
-        { icon: '📈', label: 'Валовая прибыль',       value: fmtAmount(d.gross_profit) },
-      ];
-    case 'head_of_sales':
-      return [
-        { icon: '🔄', label: 'Сделки в работе',       value: fmtNum(d.deals_in_progress) },
-        { icon: '🆕', label: 'Новые сделки',          value: fmtNum(d.new_deals) },
-        { icon: '✅', label: 'Завершённые',           value: fmtNum(d.completed_deals) },
-        { icon: '💰', label: 'Сумма начислений',      value: fmtAmount(d.total_amount) },
-        { icon: '📊', label: 'Средний чек',           value: fmtAmount(d.avg_deal_amount) },
-      ];
-    default:
-      return [];
-  }
-}
-
-/* =========================================================
-   Tab content router
-   ========================================================= */
-function renderTabSkeletons() {
-  const content = document.getElementById('tab-content');
-  content.innerHTML = Array(3).fill('<div class="skeleton skeleton-card"></div>').join('');
-}
-
-function renderTabContent() {
-  const role = state.me?.role;
-  const idx  = state.activeTab;
-  const content = document.getElementById('tab-content');
-  content.innerHTML = '';
-
-  const renderers = {
-    manager:              [renderManagerDeals, renderNewDealForm, renderManagerStats],
-    accountant:           [renderAccountantDeals, renderPaymentsTab, renderExpensesTab, renderJournalTab],
-    operations_director:  [renderOpsDashboard, renderAllDealsTab, renderAnalyticsTab, renderTeamTab, renderJournalTab],
-    head_of_sales:        [renderTeamTab, renderAllDealsTab, renderFunnelTab, renderKPITab, renderAnalyticsTab],
-  };
-
-  const fns = renderers[role] || [];
-  const fn  = fns[idx];
-  if (fn) fn(content);
-  else content.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><h3>Раздел в разработке</h3></div>';
-}
-
-/* =========================================================
-   ── MANAGER tabs ─────────────────────────────────────────
-   ========================================================= */
-function renderManagerDeals(container) {
-  const deals = state.deals;
-  if (!deals.length) { renderEmpty(container, '📭', 'Нет сделок', 'Создайте первую сделку.'); return; }
-  renderDealFilter(container, deals, 'manager');
-}
-
-function renderManagerStats(container) {
-  const d = state.dashboard;
-  if (!d) return;
-  const w = document.createElement('div');
-  w.className = 'summary-widget';
-  w.innerHTML = `
-    <div class="summary-title">📊 Мои показатели</div>
-    ${summaryRow('Всего сделок', fmtNum(d.total_my_deals))}
-    ${summaryRow('В работе', fmtNum(d.in_progress))}
-    ${summaryRow('Завершено', fmtNum(d.completed))}
-    ${summaryRow('Сумма начислений', fmtAmount(d.total_amount))}
-  `;
-  container.appendChild(w);
-}
-
-function renderNewDealForm(container) {
-  const editable = state.me?.editable_fields || [];
-  container.appendChild(buildDealForm(null, editable, async (data) => {
-    try {
-      await apiFetch('/deals/create', { method: 'POST', body: JSON.stringify(data) });
-      showToast('✅ Сделка создана');
-      switchTab(0);
-      await loadDashboard();
-    } catch (e) {
-      showToast('❌ ' + e.message);
-    }
-  }, 'Создать сделку'));
-}
-
-/* =========================================================
-   ── ACCOUNTANT tabs ───────────────────────────────────────
-   ========================================================= */
-function renderAccountantDeals(container) {
-  const deals = state.deals;
-  if (!deals.length) { renderEmpty(container, '📭', 'Нет сделок', ''); return; }
-  renderDealFilter(container, deals, 'accountant');
-}
-
-function renderPaymentsTab(container) {
-  const deals = state.deals;
-  const title = document.createElement('div');
-  title.className = 'summary-title';
-  title.textContent = '💳 Реестр оплат';
-  container.appendChild(title);
-
-  const list = document.createElement('div');
-  list.className = 'deal-list';
-
-  deals.forEach(deal => {
-    const ps = paymentStatus(deal);
-    const card = document.createElement('div');
-    card.className = 'deal-card';
-    card.innerHTML = `
-      <div class="deal-card-header">
-        <span class="deal-id">Сделка #${deal.id}</span>
-        <span class="deal-status-badge ${ps.cls}">${ps.label}</span>
-      </div>
-      <div class="deal-client">${deal.client || '—'}</div>
-      <div class="deal-row"><span class="label">Начислено</span><span class="value">${fmtAmount(deal.amount_with_vat)}</span></div>
-      <div class="deal-row"><span class="label">Оплачено</span><span class="value">${fmtAmount(deal.paid)}</span></div>
-      <div class="deal-row"><span class="label">Остаток</span><span class="value">${fmtAmount(dealRemaining(deal))}</span></div>
-      <div class="deal-row"><span class="label">Дата акта</span><span class="value">${deal.act_date || '—'}</span></div>
-    `;
-    card.addEventListener('click', () => openDealModal(deal));
-    list.appendChild(card);
-  });
-  container.appendChild(list);
-}
-
-function renderExpensesTab(container) {
-  const deals = state.deals;
-  let totalVar1 = 0, totalVar2 = 0, totalProd = 0;
-  deals.forEach(d => {
-    totalVar1 += parseFloat(d.var_exp1 || 0);
-    totalVar2 += parseFloat(d.var_exp2 || 0);
-    totalProd += parseFloat(d.prod_exp || 0);
-  });
-  const w = document.createElement('div');
-  w.className = 'summary-widget';
-  w.innerHTML = `
-    <div class="summary-title">🧾 Сводка расходов</div>
-    ${summaryRow('Переменный расход 1', fmtAmount(totalVar1.toString()))}
-    ${summaryRow('Переменный расход 2', fmtAmount(totalVar2.toString()))}
-    ${summaryRow('Общепроизводственный', fmtAmount(totalProd.toString()))}
-    ${summaryRow('Итого расходы', fmtAmount((totalVar1+totalVar2+totalProd).toString()))}
-  `;
-  container.appendChild(w);
-}
-
-/* =========================================================
-   ── OPERATIONS DIRECTOR tabs ─────────────────────────────
-   ========================================================= */
-function renderOpsDashboard(container) {
-  const d = state.dashboard;
-  if (!d) return;
-
-  // Financial summary
-  const fin = document.createElement('div');
-  fin.className = 'summary-widget';
-  fin.innerHTML = `
-    <div class="summary-title">💼 Финансовая сводка</div>
-    ${summaryRow('Всего сделок', fmtNum(d.total_deals))}
-    ${summaryRow('Активные сделки', fmtNum(d.active_deals))}
-    ${summaryRow('Начислено', fmtAmount(d.total_amount))}
-    ${summaryRow('Оплачено', fmtAmount(d.total_paid))}
-    ${summaryRow('Дебиторка', fmtAmount(d.receivable))}
-    ${summaryRow('Расходы', fmtAmount(d.total_expenses))}
-    ${summaryRow('Валовая прибыль *', fmtAmount(d.gross_profit))}
-  `;
-  container.appendChild(fin);
-
-  const hint = document.createElement('p');
-  hint.style.cssText = 'font-size:11px;color:var(--tg-hint);padding:0 4px 12px';
-  hint.textContent = '* Рассчитано как: Оплачено − Расходы (оценочный показатель)';
-  container.appendChild(hint);
-
-  // Top managers
-  if (d.by_manager?.length) {
-    const mgr = document.createElement('div');
-    mgr.className = 'summary-widget';
-    mgr.innerHTML = `<div class="summary-title">👥 Лидеры по начислениям</div>`;
-    const sorted = [...d.by_manager].sort((a, b) => b.amount - a.amount).slice(0, 5);
-    sorted.forEach((m, i) => {
-      mgr.innerHTML += summaryRow(`${i+1}. ${m.manager}`, fmtAmount(m.amount));
+  bar.innerHTML = tabs.map((t, i) =>
+    `<button class="tab-item ${i === State.activeTab ? 'active' : ''}" data-tab="${i}">${t}</button>`
+  ).join('');
+  bar.querySelectorAll('.tab-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      State.activeTab = parseInt(btn.dataset.tab);
+      State.activeFilter = 'all';
+      renderDashboard();
     });
-    container.appendChild(mgr);
-  }
-
-  // Recent deals
-  const recent = [...(d.deals||[])].slice(-5).reverse();
-  if (recent.length) {
-    const rw = document.createElement('div');
-    rw.className = 'summary-widget';
-    rw.innerHTML = `<div class="summary-title">🕒 Последние сделки</div>`;
-    const list = document.createElement('div');
-    list.className = 'deal-list';
-    recent.forEach(deal => list.appendChild(buildDealCard(deal, 'ops')));
-    rw.appendChild(list);
-    container.appendChild(rw);
-  }
-}
-
-function renderAllDealsTab(container) {
-  const deals = state.deals;
-  if (!deals.length) { renderEmpty(container, '📭', 'Нет сделок', ''); return; }
-  renderDealFilter(container, deals, state.me.role);
-}
-
-function renderAnalyticsTab(container) {
-  const d = state.dashboard;
-  if (!d) return;
-
-  if (d.by_manager?.length) {
-    const title = document.createElement('div');
-    title.className = 'summary-title';
-    title.style.marginBottom = '12px';
-    title.textContent = '📊 Аналитика по менеджерам';
-    container.appendChild(title);
-
-    d.by_manager.forEach(m => {
-      const card = document.createElement('div');
-      card.className = 'manager-card';
-      card.innerHTML = `
-        <div class="manager-card-header">
-          <span class="manager-name">👤 ${m.manager}</span>
-          <span class="deal-status-badge status-inprogress">${m.deals} сделок</span>
-        </div>
-        <div class="manager-stats">
-          <div class="manager-stat">
-            <div class="stat-val">${fmtNum(m.deals)}</div>
-            <div class="stat-lbl">Сделок</div>
-          </div>
-          <div class="manager-stat">
-            <div class="stat-val">${fmtAmount(m.amount)}</div>
-            <div class="stat-lbl">Начислено</div>
-          </div>
-          <div class="manager-stat">
-            <div class="stat-val">${fmtAmount(m.avg || 0)}</div>
-            <div class="stat-lbl">Средний чек</div>
-          </div>
-        </div>
-      `;
-      container.appendChild(card);
-    });
-  } else {
-    renderEmpty(container, '📊', 'Нет данных', 'Аналитика появится после добавления сделок.');
-  }
-}
-
-function renderTeamTab(container) {
-  renderAnalyticsTab(container);
-}
-
-/* =========================================================
-   ── HEAD OF SALES tabs ────────────────────────────────────
-   ========================================================= */
-function renderFunnelTab(container) {
-  const deals = state.deals;
-  // Group by status
-  const byStatus = {};
-  deals.forEach(d => {
-    const s = d.status || 'Неизвестно';
-    if (!byStatus[s]) byStatus[s] = { count: 0, amount: 0 };
-    byStatus[s].count++;
-    byStatus[s].amount += parseFloat(d.amount_with_vat || 0);
-  });
-
-  const title = document.createElement('div');
-  title.className = 'summary-title';
-  title.style.marginBottom = '12px';
-  title.textContent = '📈 Воронка по статусам';
-  container.appendChild(title);
-
-  if (!Object.keys(byStatus).length) {
-    renderEmpty(container, '📭', 'Нет данных', '');
-    return;
-  }
-
-  Object.entries(byStatus).forEach(([status, info]) => {
-    const card = document.createElement('div');
-    card.className = 'summary-widget';
-    card.innerHTML = `
-      <div class="summary-title">
-        <span class="deal-status-badge ${statusClass(status)}" style="margin-right:8px">${status}</span>
-      </div>
-      ${summaryRow('Количество сделок', fmtNum(info.count))}
-      ${summaryRow('Сумма начислений', fmtAmount(info.amount.toString()))}
-    `;
-    container.appendChild(card);
   });
 }
 
-function renderKPITab(container) {
-  const d = state.dashboard;
-  if (!d) return;
-  const w = document.createElement('div');
-  w.className = 'summary-widget';
-  w.innerHTML = `
-    <div class="summary-title">📊 KPI команды</div>
-    ${summaryRow('Сделок в работе', fmtNum(d.deals_in_progress))}
-    ${summaryRow('Новых сделок', fmtNum(d.new_deals))}
-    ${summaryRow('Завершённых', fmtNum(d.completed_deals))}
-    ${summaryRow('Сумма начислений', fmtAmount(d.total_amount))}
-    ${summaryRow('Средний чек', fmtAmount(d.avg_deal_amount))}
-  `;
-  container.appendChild(w);
-
-  renderAnalyticsTab(container);
-}
-
-/* =========================================================
-   ── JOURNAL tab ───────────────────────────────────────────
-   ========================================================= */
-async function renderJournalTab(container) {
-  container.innerHTML = '<div class="skeleton skeleton-card"></div>'.repeat(3);
-  try {
-    const entries = await apiFetch('/journal/recent?limit=30');
-    container.innerHTML = '';
-    if (!entries.length) { renderEmpty(container, '📜', 'Журнал пуст', ''); return; }
-    const title = document.createElement('div');
-    title.className = 'summary-title';
-    title.style.marginBottom = '12px';
-    title.textContent = '📜 Журнал действий';
-    container.appendChild(title);
-    entries.forEach(e => {
-      const el = document.createElement('div');
-      el.className = 'journal-entry';
-      el.innerHTML = `
-        <div class="journal-meta">
-          <span>${e.timestamp}</span>
-          <span>${e.role || '—'}</span>
-        </div>
-        <div class="journal-action">${actionLabel(e.action)} ${e.deal_id ? `#${e.deal_id}` : ''}</div>
-        <div class="journal-summary">${e.summary || ''}</div>
-      `;
-      container.appendChild(el);
-    });
-  } catch (err) {
-    container.innerHTML = '';
-    showToast('Ошибка загрузки журнала');
-  }
-}
-
-function actionLabel(action) {
-  const map = {
-    create_deal: '📝 Создание сделки',
-    update_deal: '✏️ Обновление сделки',
-  };
-  return map[action] || action || '—';
-}
-
-/* =========================================================
-   Deal filter / list helpers
-   ========================================================= */
-function renderDealFilter(container, deals, role) {
-  // Filter chips
-  const statuses = ['all', ...new Set(deals.map(d => d.status).filter(Boolean))];
-  const filterRow = document.createElement('div');
-  filterRow.className = 'filter-row';
-
-  statuses.forEach(s => {
-    const chip = document.createElement('button');
-    chip.className = 'chip' + (state.currentFilter === s ? ' active' : '');
-    chip.textContent = s === 'all' ? 'Все' : s;
-    chip.addEventListener('click', () => {
-      state.currentFilter = s;
-      container.innerHTML = '';
-      renderDealFilter(container, deals, role);
+function renderBottomNav(items) {
+  const nav = document.getElementById('bottom-nav');
+  nav.innerHTML = items.map((item, i) =>
+    `<button class="nav-item ${i === State.activeNav ? 'active' : ''}" data-nav="${i}">
+      <span class="nav-item__icon">${item.icon}</span>
+      <span class="nav-item__label">${item.label}</span>
+    </button>`
+  ).join('');
+  nav.querySelectorAll('.nav-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      State.activeNav = parseInt(btn.dataset.nav);
+      State.activeTab = State.activeNav;
+      State.activeFilter = 'all';
+      renderDashboard();
     });
     filterRow.appendChild(chip);
   });
-  container.appendChild(filterRow);
-
-  const filtered = state.currentFilter === 'all'
-    ? deals
-    : deals.filter(d => d.status === state.currentFilter);
-
-  if (!filtered.length) {
-    renderEmpty(container, '🔍', 'Ничего не найдено', 'Попробуйте другой фильтр.');
-    return;
-  }
-
-  const list = document.createElement('div');
-  list.className = 'deal-list';
-  filtered.forEach(deal => {
-    list.appendChild(buildDealCard(deal, role));
-  });
-  container.appendChild(list);
 }
 
-function buildDealCard(deal, role) {
-  const card = document.createElement('div');
-  card.className = 'deal-card';
-
-  const sClass = statusClass(deal.status);
-
-  if (role === 'accountant') {
-    const ps = paymentStatus(deal);
-    card.innerHTML = `
-      <div class="deal-card-header">
-        <span class="deal-id">Сделка #${deal.id}</span>
-        <span class="deal-status-badge ${ps.cls}">${ps.label}</span>
-      </div>
-      <div class="deal-client">${deal.client || '—'}</div>
-      <div class="deal-row"><span class="label">Начислено</span><span class="value">${fmtAmount(deal.amount_with_vat)}</span></div>
-      <div class="deal-row"><span class="label">Оплачено</span><span class="value">${fmtAmount(deal.paid)}</span></div>
-      <div class="deal-row"><span class="label">Дата акта</span><span class="value">${deal.act_date || '—'}</span></div>
-    `;
-  } else {
-    card.innerHTML = `
-      <div class="deal-card-header">
-        <span class="deal-id">Сделка #${deal.id}</span>
-        <span class="deal-status-badge ${sClass}">${deal.status || '—'}</span>
-      </div>
-      <div class="deal-client">${deal.client || '—'}</div>
-      <div class="deal-direction">${deal.direction || ''}</div>
-      <div class="deal-row"><span class="label">Начислено</span><span class="value">${fmtAmount(deal.amount_with_vat)}</span></div>
-      <div class="deal-row"><span class="label">Менеджер</span><span class="value">${deal.manager || '—'}</span></div>
-      ${deal.comment ? `<div class="deal-row"><span class="label">Комментарий</span><span class="value">${deal.comment}</span></div>` : ''}
-    `;
-  }
-
-  card.addEventListener('click', () => openDealModal(deal));
-  return card;
+function showStickyActions(actions) {
+  const bar = document.getElementById('sticky-actions');
+  bar.innerHTML = actions.map(a =>
+    `<button class="action-btn ${a.cls}" onclick="${a.action}">${a.label}</button>`
+  ).join('');
+  bar.classList.remove('hidden');
 }
 
-/* =========================================================
-   Deal modal
-   ========================================================= */
-function openDealModal(deal) {
-  const modal = document.getElementById('deal-modal');
-  const title = document.getElementById('modal-title');
-  const body  = document.getElementById('modal-body');
-  const footer = document.getElementById('modal-footer');
-
-  title.textContent = `Сделка #${deal.id}`;
-  body.innerHTML = '';
-  footer.innerHTML = '';
-
-  const editable = new Set(state.me?.editable_fields || []);
-
-  // Build read-only view
-  const viewSection = document.createElement('div');
-  ALL_DEAL_FIELDS.forEach(field => {
-    const val = deal[field];
-    const row = document.createElement('div');
-    row.className = 'deal-row';
-    row.innerHTML = `<span class="label">${FIELD_LABELS[field]}</span><span class="value">${val || '—'}</span>`;
-    viewSection.appendChild(row);
-  });
-  body.appendChild(viewSection);
-
-  // Edit button (if user has editable fields for this deal)
-  if (editable.size > 0) {
-    const editBtn = document.createElement('button');
-    editBtn.className = 'btn btn-primary';
-    editBtn.textContent = '✏️ Редактировать';
-    editBtn.addEventListener('click', () => openEditDealModal(deal));
-    footer.appendChild(editBtn);
-  }
-
-  // Close
-  document.getElementById('modal-close').onclick = closeModal;
-  document.getElementById('modal-backdrop').onclick = closeModal;
-  modal.classList.remove('hidden');
+function hideStickyActions() {
+  document.getElementById('sticky-actions').classList.add('hidden');
 }
 
-function openEditDealModal(deal) {
-  const modal = document.getElementById('deal-modal');
-  const title = document.getElementById('modal-title');
-  const body  = document.getElementById('modal-body');
-  const footer = document.getElementById('modal-footer');
-
-  title.textContent = `Редактировать #${deal.id}`;
-  body.innerHTML = '';
-  footer.innerHTML = '';
-
-  const editable = state.me?.editable_fields || [];
-  const form = buildDealForm(deal, editable, async (data) => {
-    try {
-      await apiFetch(`/deals/${deal.id}`, { method: 'PUT', body: JSON.stringify(data) });
-      showToast('✅ Сделка обновлена');
-      closeModal();
-      await loadDashboard();
-    } catch (e) {
-      showToast('❌ ' + e.message);
-    }
-  }, 'Сохранить изменения');
-  body.appendChild(form);
-}
-
-function closeModal() {
-  document.getElementById('deal-modal').classList.add('hidden');
-}
-
-/* =========================================================
-   Deal form builder
-   ========================================================= */
-function buildDealForm(existingDeal, editableFields, onSubmit, submitLabel) {
-  const editableSet = new Set(editableFields);
-  const wrapper = document.createElement('div');
-
-  // Editable fields section
-  const editSection = document.createElement('div');
-  editSection.className = 'form-section';
-  const editTitle = document.createElement('div');
-  editTitle.className = 'form-section-title';
-  editTitle.textContent = 'Редактируемые поля';
-  editSection.appendChild(editTitle);
-
-  // Read-only section
-  const readSection = document.createElement('div');
-  readSection.className = 'form-section';
-  const readTitle = document.createElement('div');
-  readTitle.className = 'form-section-title';
-  readTitle.textContent = 'Только чтение';
-  readSection.appendChild(readTitle);
-
-  let hasReadOnly = false;
-
-  ALL_DEAL_FIELDS.forEach(field => {
-    const isEditable = editableSet.has(field);
-    const val = existingDeal ? (existingDeal[field] || '') : '';
-    const label = FIELD_LABELS[field];
-
-    const group = document.createElement('div');
-    group.className = 'form-group';
-
-    if (isEditable) {
-      group.innerHTML = `
-        <label class="form-label">${label}</label>
-        <input class="form-input" type="text" name="${field}" value="${escHtml(val)}" placeholder="${label}">
-      `;
-      editSection.appendChild(group);
-    } else if (existingDeal) {
-      group.innerHTML = `
-        <label class="form-label">${label}</label>
-        <input class="form-input" type="text" name="${field}" value="${escHtml(val)}" readonly>
-        <p class="form-hint">Только чтение</p>
-      `;
-      readSection.appendChild(group);
-      hasReadOnly = true;
-    }
-  });
-
-  wrapper.appendChild(editSection);
-  if (hasReadOnly) wrapper.appendChild(readSection);
-
-  const submitBtn = document.createElement('button');
-  submitBtn.className = 'btn btn-primary';
-  submitBtn.textContent = submitLabel || 'Сохранить';
-  submitBtn.type = 'button';
-  submitBtn.addEventListener('click', () => {
-    const data = {};
-    wrapper.querySelectorAll('input:not([readonly]):not([disabled]), select:not([disabled]), textarea:not([readonly]):not([disabled])').forEach(el => {
-      if (el.name) data[el.name] = el.value;
+function bindFilters() {
+  document.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      State.activeFilter = chip.dataset.filter;
+      renderDashboard();
     });
-    onSubmit(data);
   });
-  wrapper.appendChild(submitBtn);
-
-  return wrapper;
 }
 
-/* =========================================================
-   Helpers
-   ========================================================= */
-function summaryRow(label, value) {
-  return `<div class="summary-row"><span class="s-label">${label}</span><span class="s-value">${value}</span></div>`;
+// ── Dashboard Router ──────────────────────────────────────
+
+function renderDashboard() {
+  switch (State.role) {
+    case 'manager':    buildManagerDashboard();    break;
+    case 'accountant': buildAccountantDashboard(); break;
+    case 'opdir':      buildOpDirDashboard();      break;
+    case 'rop':        buildRopDashboard();         break;
+  }
 }
 
-function renderEmpty(container, icon, title, subtitle) {
-  const el = document.createElement('div');
-  el.className = 'empty-state';
-  el.innerHTML = `<div class="empty-icon">${icon}</div><h3>${title}</h3><p>${subtitle}</p>`;
-  container.appendChild(el);
-}
+// ── App Boot ──────────────────────────────────────────────
 
-function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
+const App = {
+  selectRole(roleId) {
+    State.role = roleId;
+    State.activeTab = 0;
+    State.activeFilter = 'all';
+    State.activeNav = 0;
 
-/* =========================================================
-   Bootstrap
-   ========================================================= */
-document.addEventListener('DOMContentLoaded', init);
+    const roleConf = ROLES[roleId];
+    const mainApp  = document.getElementById('main-app');
+    const selector = document.getElementById('role-selector');
+
+    // Apply role class to main app wrapper
+    mainApp.className = 'main-app ' + roleConf.cssClass;
+
+    // Update header
+    document.getElementById('header-name').textContent = State.userName;
+    document.getElementById('header-role-badge').textContent = roleConf.badgeLabel;
+    document.getElementById('header-avatar').textContent = State.userInitial;
+
+    selector.classList.add('hidden');
+    mainApp.classList.remove('hidden');
+
+    renderDashboard();
+  },
+
+  noop() {
+    // placeholder for action buttons
+    if (window.Telegram && window.Telegram.WebApp) {
+      window.Telegram.WebApp.showAlert('Функция будет доступна в полной версии.');
+    }
+  },
+
+  init() {
+    const tg = window.Telegram && window.Telegram.WebApp;
+
+    if (tg) {
+      tg.ready();
+      tg.expand();
+      document.body.classList.add('tg-theme');
+
+      // Try to get user info from Telegram
+      const user = tg.initDataUnsafe && tg.initDataUnsafe.user;
+      if (user) {
+        const firstName = user.first_name || '';
+        const lastName  = user.last_name  || '';
+        State.userName  = [firstName, lastName].filter(Boolean).join(' ') || 'Пользователь';
+        State.userInitial = State.userName[0].toUpperCase();
+      }
+
+      // Handle back button
+      tg.BackButton.onClick(() => {
+        const selector = document.getElementById('role-selector');
+        if (!selector.classList.contains('hidden')) return;
+        document.getElementById('main-app').classList.add('hidden');
+        document.getElementById('role-selector').classList.remove('hidden');
+        tg.BackButton.hide();
+      });
+    }
+
+    // Check URL param for role (demo mode)
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlRole = urlParams.get('role');
+
+    // Dismiss splash
+    const splash = document.getElementById('splash');
+    setTimeout(() => {
+      splash.classList.add('fade-out');
+      setTimeout(() => {
+        splash.classList.add('hidden');
+
+        if (urlRole && ROLES[urlRole]) {
+          App.selectRole(urlRole);
+        } else {
+          document.getElementById('role-selector').classList.remove('hidden');
+        }
+
+        // Switch role button
+        document.getElementById('switch-role-btn').addEventListener('click', () => {
+          State.activeTab = 0;
+          State.activeFilter = 'all';
+          State.activeNav = 0;
+          document.getElementById('main-app').classList.add('hidden');
+          document.getElementById('role-selector').classList.remove('hidden');
+        });
+
+        // Notification button
+        document.getElementById('notif-btn').addEventListener('click', () => {
+          App.noop();
+        });
+
+      }, 400);
+    }, 1200);
+  },
+};
+
+// ── Start ─────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => App.init());
