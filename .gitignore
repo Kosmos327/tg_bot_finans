@@ -1,46 +1,10 @@
-# Python
 __pycache__/
 *.py[cod]
 *.pyo
-*.pyd
-.Python
+.pytest_cache/
 *.egg-info/
 dist/
 build/
-*.egg
-.eggs/
-
-# Virtual environments
-.venv/
-venv/
-env/
 .env
-
-# Credentials & secrets (DO NOT commit)
-service_account.json
-*.json.key
-credentials.json
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-logs/
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Distribution
-dist/
-build/
+.venv
+venv/
