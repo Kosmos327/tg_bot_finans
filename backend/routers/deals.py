@@ -231,6 +231,8 @@ async def update_deal(
             user_role=role,
             full_name=full_name,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SheetsError as exc:
         logger.error("Sheets error updating deal %s: %s", deal_id, exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc

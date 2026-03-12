@@ -295,9 +295,21 @@ def create_deal(
     Validate *deal_data*, generate a new deal ID, append a row to the sheet,
     and write a journal entry.
 
+    Role-based field filtering is applied before persisting: fields outside
+    the caller's editable set are silently dropped (accounting fields for a
+    manager, etc.).  For the "manager" role the ``manager`` field is always
+    overwritten with the caller's own ``full_name`` to prevent impersonation.
+
     Returns the new deal_id string.
     Raises ValueError for validation errors, SheetsError for sheet failures.
     """
+    # Apply role-based field filtering so callers cannot set forbidden fields
+    deal_data = filter_update_payload(user_role, deal_data) if user_role else dict(deal_data)
+
+    # Managers must be attributed to themselves
+    if user_role == "manager" and full_name:
+        deal_data["manager"] = full_name
+
     _validate_required_fields(deal_data)
 
     with _deal_id_lock:
@@ -384,7 +396,10 @@ def update_deal(
         logger.info(
             "No permitted fields to update for role '%s' on deal %s", user_role, deal_id
         )
-        return False
+        raise ValueError(
+            f"No fields in the request are editable by role '{user_role}'. "
+            f"Rejected fields: {rejected_fields}"
+        )
 
     try:
         ws = get_worksheet(SHEET_DEALS)

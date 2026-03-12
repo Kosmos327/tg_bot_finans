@@ -49,12 +49,37 @@ JOURNAL_HEADERS: List[str] = [
 
 
 def _ensure_headers(ws) -> None:
-    """Write the header row if the sheet is completely empty."""
+    """
+    Write the header row if the sheet is completely empty.
+
+    If the sheet already has content, validate that the first row matches
+    JOURNAL_HEADERS.  Mismatched or missing headers are logged as a warning
+    so operators can identify misconfigured sheets before entries are written
+    to wrong columns.
+    """
     try:
         existing = ws.row_values(1)
-        if not any(c.strip() for c in existing):
+        existing_stripped = [c.strip() for c in existing]
+
+        if not any(existing_stripped):
+            # Sheet is empty – write the canonical header row
             ws.append_row(JOURNAL_HEADERS, value_input_option="USER_ENTERED")
             logger.info("Created journal header row in '%s'.", SHEET_JOURNAL)
+            return
+
+        # Sheet has some content – validate headers match expectations
+        existing_set = set(existing_stripped)
+        missing_headers = [h for h in JOURNAL_HEADERS if h not in existing_set]
+        if missing_headers:
+            logger.warning(
+                "Journal sheet '%s' has missing or mismatched headers: %s. "
+                "Expected: %s. Found: %s. "
+                "Entries may be written to incorrect columns.",
+                SHEET_JOURNAL,
+                missing_headers,
+                JOURNAL_HEADERS,
+                existing_stripped,
+            )
     except Exception as exc:
         logger.warning("Could not ensure journal headers: %s", exc)
 
