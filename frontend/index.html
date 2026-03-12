@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Финансовый менеджер</title>
+
+  <!-- Telegram Mini App SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+<!-- ── Шапка ──────────────────────────────────────────────────────────── -->
+<header class="app-header">
+  <div class="header__avatar" id="user-avatar">А</div>
+  <div class="header__info">
+    <div class="header__name" id="user-name">Загрузка...</div>
+    <div class="header__role" id="user-role"></div>
+  </div>
+  <!-- Демо-переключатель: в production скрыт -->
+  <div class="demo-selector">
+    <span>Роль:</span>
+    <select id="demo-user-select"></select>
+  </div>
+</header>
+
+<!-- ── Основной контент ────────────────────────────────────────────────── -->
+<main class="app-content">
+
+  <!-- Экран: Сделки -->
+  <section id="screen-deals" class="screen">
+    <div class="deals-toolbar">
+      <button class="btn btn--primary hidden" id="btn-add-deal">+ Новая сделка</button>
+    </div>
+    <div id="deals-list"></div>
+  </section>
+
+  <!-- Экран: Журнал -->
+  <section id="screen-journal" class="screen hidden">
+    <h2 class="screen-title">Журнал операций</h2>
+    <div class="journal-toolbar">
+      <button class="btn btn--primary hidden" id="btn-add-journal">+ Запись</button>
+    </div>
+    <div id="journal-list"></div>
+  </section>
+
+  <!-- Экран: Аналитика -->
+  <section id="screen-analytics" class="screen hidden">
+    <h2 class="screen-title">Аналитика</h2>
+    <div id="analytics-content"></div>
+  </section>
+
+  <!-- Экран: Настройки -->
+  <section id="screen-settings" class="screen hidden">
+    <h2 class="screen-title">Настройки</h2>
+    <div id="settings-content"></div>
+  </section>
+
+</main>
+
+<!-- ── Нижняя навигация ────────────────────────────────────────────────── -->
+<nav id="tab-bar"></nav>
+
+<!-- ── Модальное окно: Просмотр/редактирование сделки ─────────────────── -->
+<div class="modal-overlay hidden" id="deal-modal">
+  <div class="modal" id="deal-modal-content"></div>
+</div>
+
+<!-- ── Модальное окно: Создать сделку ─────────────────────────────────── -->
+<div class="modal-overlay hidden" id="add-deal-modal">
+  <div class="modal">
+    <h2 class="modal__title">Новая сделка</h2>
+    <form id="form-add-deal">
+      <label class="field-label">Название *
+        <input class="field-input" type="text" name="name" required placeholder="Название сделки" />
+      </label>
+      <label class="field-label">Клиент *
+        <input class="field-input" type="text" name="client" required placeholder="Название клиента" />
+      </label>
+      <label class="field-label">Статус
+        <select class="field-input" name="status">
+          <option value="new">Новая</option>
+          <option value="in_progress">В работе</option>
+          <option value="completed">Завершена</option>
+          <option value="cancelled">Отменена</option>
+        </select>
+      </label>
+      <label class="field-label">Сумма, ₽
+        <input class="field-input" type="number" name="amount" min="0" value="0" />
+      </label>
+      <label class="field-label">Дата
+        <input class="field-input" type="date" name="date" />
+      </label>
+      <label class="field-label">Комментарий
+        <textarea class="field-input" name="comment" placeholder="Необязательно"></textarea>
+      </label>
+      <div class="modal__actions">
+        <button class="btn btn--primary" type="submit">Создать</button>
+        <button class="btn btn--secondary" type="button" id="btn-cancel-add-deal">Отмена</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Toast уведомление ───────────────────────────────────────────────── -->
+<div class="toast" id="toast"></div>
+
+<!-- ── Оверлей загрузки ────────────────────────────────────────────────── -->
+<div class="loading-overlay hidden" id="loading">
+  <div class="spinner"></div>
+</div>
+
+<!-- ── Скрипты ────────────────────────────────────────────────────────── -->
+<script src="js/permissions.js"></script>
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
