@@ -3,6 +3,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from backend.routers import deals, settings, auth, dashboard, journal
@@ -45,9 +46,19 @@ if os.path.isdir(_miniapp_dir):
 
 @app.get("/health")
 async def health_check() -> dict:
-    return {"status": "ok", "service": "tg_bot_finans"}
+    return {"status": "ok"}
+
+
+@app.head("/health")
+async def health_check_head() -> Response:
+    return Response(status_code=200)
 
 
 @app.get("/")
 async def root() -> dict:
-    return {"message": "Финансовая система API", "docs": "/docs"}
+    return {"status": "ok"}
+
+
+@app.head("/")
+async def root_head() -> Response:
+    return Response(status_code=200)
