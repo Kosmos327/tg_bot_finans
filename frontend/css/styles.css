@@ -1,0 +1,404 @@
+/* =========================================================
+   Telegram Mini App — Финансовый менеджер
+   Стили: mobile-first, Telegram-тема
+   ========================================================= */
+
+/* ── Переменные ─────────────────────────────────────────── */
+:root {
+  --tg-bg: var(--tg-theme-bg-color, #ffffff);
+  --tg-text: var(--tg-theme-text-color, #000000);
+  --tg-hint: var(--tg-theme-hint-color, #707579);
+  --tg-link: var(--tg-theme-link-color, #2481cc);
+  --tg-button: var(--tg-theme-button-color, #2481cc);
+  --tg-button-text: var(--tg-theme-button-text-color, #ffffff);
+  --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #f0f0f0);
+
+  --color-success: #27ae60;
+  --color-danger: #e74c3c;
+  --color-warning: #f39c12;
+  --color-info: #2980b9;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --spacing: 16px;
+  --tab-h: 60px;
+  --header-h: 56px;
+}
+
+/* ── Сброс и базовые стили ──────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--tg-bg);
+  color: var(--tg-text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+}
+
+button { cursor: pointer; font: inherit; border: none; background: none; }
+input, select, textarea { font: inherit; }
+
+/* ── Шапка ──────────────────────────────────────────────── */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--tg-bg);
+  border-bottom: 1px solid var(--tg-secondary-bg);
+  padding: 10px var(--spacing);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--header-h);
+}
+
+.header__avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--tg-button);
+  color: var(--tg-button-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.header__info { flex: 1; min-width: 0; }
+.header__name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.header__role { font-size: 12px; color: var(--tg-hint); }
+
+/* Демо-переключатель */
+.demo-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--tg-hint);
+}
+
+#demo-user-select {
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--tg-secondary-bg);
+  border-radius: var(--radius-sm);
+  background: var(--tg-bg);
+  color: var(--tg-text);
+  max-width: 170px;
+}
+
+/* ── Основной контент ───────────────────────────────────── */
+.app-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing);
+  padding-bottom: calc(var(--tab-h) + var(--spacing));
+}
+
+/* ── Нижняя навигация ───────────────────────────────────── */
+#tab-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--tab-h);
+  background: var(--tg-bg);
+  border-top: 1px solid var(--tg-secondary-bg);
+  display: flex;
+  z-index: 100;
+}
+
+.tab-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: var(--tg-hint);
+  transition: color 0.15s;
+  padding: 6px 4px;
+}
+
+.tab-btn--active { color: var(--tg-button); }
+.tab-icon { font-size: 20px; line-height: 1; }
+.tab-label { font-size: 10px; font-weight: 500; }
+
+/* ── Экраны ─────────────────────────────────────────────── */
+.screen { display: block; }
+.screen.hidden { display: none; }
+
+.screen-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: var(--spacing);
+}
+
+/* ── Карточки сделок ────────────────────────────────────── */
+.deals-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.deal-card {
+  background: var(--tg-secondary-bg);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.deal-card:active { opacity: 0.7; }
+
+.deal-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.deal-card__name { font-weight: 600; font-size: 15px; }
+.deal-card__meta { display: flex; justify-content: space-between; font-size: 13px; color: var(--tg-hint); }
+.deal-card__amount { font-weight: 600; color: var(--tg-text); }
+.deal-card__date { font-size: 12px; color: var(--tg-hint); margin-top: 4px; }
+
+/* Бейджи статусов */
+.deal-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.status--new { background: #e3f2fd; color: #1565c0; }
+.status--in_progress { background: #fff8e1; color: #e65100; }
+.status--completed { background: #e8f5e9; color: #2e7d32; }
+.status--cancelled { background: #fce4ec; color: #c62828; }
+
+/* ── Журнал ─────────────────────────────────────────────── */
+.journal-toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+
+.journal-entry {
+  background: var(--tg-secondary-bg);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.journal-entry__header { display: flex; justify-content: space-between; margin-bottom: 6px; }
+.journal-entry__date { font-size: 12px; color: var(--tg-hint); }
+.journal-entry__desc { font-size: 14px; margin-bottom: 4px; }
+.journal-entry__amount { font-weight: 700; font-size: 16px; }
+
+.journal-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 12px; }
+.journal-badge--income { background: #e8f5e9; color: #2e7d32; }
+.journal-badge--expense { background: #fce4ec; color: #c62828; }
+
+/* ── Аналитика ──────────────────────────────────────────── */
+.analytics-section { margin-bottom: 24px; }
+.section-title { font-size: 17px; font-weight: 700; margin-bottom: 12px; }
+.section-subtitle { font-size: 14px; font-weight: 600; margin: 12px 0 8px; color: var(--tg-hint); }
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.stat-card {
+  background: var(--tg-secondary-bg);
+  border-radius: var(--radius);
+  padding: 14px;
+  text-align: center;
+}
+
+.stat-card--green { background: #e8f5e9; }
+.stat-card--red { background: #fce4ec; }
+.stat-value { font-size: 18px; font-weight: 700; word-break: break-all; }
+.stat-label { font-size: 12px; color: var(--tg-hint); margin-top: 4px; }
+
+.status-breakdown { display: flex; flex-direction: column; gap: 6px; }
+.status-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; }
+.status-count { font-weight: 600; }
+
+/* ── Настройки ──────────────────────────────────────────── */
+.role-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.role--admin { background: #e3f2fd; color: #1565c0; }
+.role--sales { background: #fff8e1; color: #e65100; }
+.role--accounting { background: #e8f5e9; color: #2e7d32; }
+.role--viewer { background: #f3e5f5; color: #6a1b9a; }
+
+.perm-tag {
+  display: inline-block;
+  font-size: 10px;
+  background: var(--tg-secondary-bg);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin: 1px;
+}
+
+.perms-cell { font-size: 11px; line-height: 1.6; }
+
+/* ── Таблицы ────────────────────────────────────────────── */
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.data-table th { text-align: left; padding: 8px 6px; border-bottom: 2px solid var(--tg-secondary-bg); font-weight: 600; }
+.data-table td { padding: 8px 6px; border-bottom: 1px solid var(--tg-secondary-bg); vertical-align: top; }
+
+/* ── Модальные окна ─────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 200;
+  overflow-y: auto;
+  display: flex;
+  align-items: flex-start;
+  padding: 20px var(--spacing);
+}
+
+.modal-overlay.hidden { display: none; }
+
+.modal {
+  background: var(--tg-bg);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 500px;
+  margin: auto;
+  padding: var(--spacing);
+}
+
+.modal__title { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+.modal__actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+
+/* ── Поля формы ─────────────────────────────────────────── */
+.fieldset {
+  border: 1px solid var(--tg-secondary-bg);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.fieldset__legend {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tg-hint);
+  padding: 0 4px;
+}
+
+.field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--tg-hint);
+}
+
+.field-input {
+  background: var(--tg-secondary-bg);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--tg-text);
+  width: 100%;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.field-input:focus { border-color: var(--tg-button); }
+
+/* Поле только для чтения — визуально приглушено */
+.field--readonly,
+.field-input:disabled,
+.field-input[readonly] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: var(--tg-secondary-bg);
+}
+
+textarea.field-input { min-height: 72px; resize: vertical; }
+
+.field-checkbox { width: 18px; height: 18px; accent-color: var(--tg-button); align-self: flex-start; margin-top: 4px; }
+
+/* ── Кнопки ─────────────────────────────────────────────── */
+.btn {
+  padding: 10px 20px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 14px;
+  transition: opacity 0.15s;
+}
+
+.btn:active { opacity: 0.7; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn--primary { background: var(--tg-button); color: var(--tg-button-text); }
+.btn--danger { background: var(--color-danger); color: #fff; }
+.btn--secondary { background: var(--tg-secondary-bg); color: var(--tg-text); }
+
+/* ── Toast уведомления ──────────────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: calc(var(--tab-h) + 12px);
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: #333;
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 20px;
+  font-size: 13px;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none;
+  z-index: 300;
+}
+
+.toast--visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast--success { background: var(--color-success); }
+.toast--error { background: var(--color-danger); }
+
+/* ── Загрузка ───────────────────────────────────────────── */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255,255,255,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 400;
+}
+
+.loading-overlay.hidden { display: none; }
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--tg-secondary-bg);
+  border-top-color: var(--tg-button);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Прочее ─────────────────────────────────────────────── */
+.empty-msg { color: var(--tg-hint); text-align: center; padding: 32px; }
+.text-muted { color: var(--tg-hint); }
+.hidden { display: none !important; }
