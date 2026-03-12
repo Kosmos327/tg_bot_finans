@@ -45,6 +45,27 @@ tg_bot_finans/
 
 ---
 
+## Архитектура запуска (один процесс)
+
+FastAPI и Telegram бот работают **в одном процессе**. Бот запускается
+автоматически вместе с FastAPI через механизм `lifespan`. Опрос Telegram API
+(polling) выполняется в фоне через `asyncio.create_task`, не блокируя FastAPI.
+
+Единственная команда запуска:
+
+```bash
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+
+Эта команда запускает **одновременно**:
+- FastAPI (REST API + Mini App)
+- Telegram бот (polling, ответ на `/start`, кнопка «🚀 Открыть Mini App»)
+
+Кнопка «🚀 Открыть Mini App» открывает Telegram Mini App по URL из
+переменной окружения `WEBAPP_URL`.
+
+---
+
 ## Быстрый старт (локальная разработка)
 
 1. Скопируйте `.env.example` в `.env` и заполните все переменные:
@@ -57,13 +78,9 @@ tg_bot_finans/
    ```bash
    pip install -r requirements.txt
    ```
-4. Запустите backend:
+4. Запустите приложение (FastAPI + бот в одном процессе):
    ```bash
    uvicorn backend.main:app --reload
-   ```
-5. Запустите бота (отдельный процесс):
-   ```bash
-   python -m bot.bot
    ```
 
 ---
@@ -72,17 +89,17 @@ tg_bot_finans/
 
 1. В панели Timeweb App добавьте переменные окружения:
    - `TELEGRAM_BOT_TOKEN` — токен бота
-   - `WEBAPP_URL` — URL Mini App (должен быть HTTPS)
+   - `WEBAPP_URL` — URL Mini App (должен быть HTTPS), используется для кнопки бота
    - `GOOGLE_SERVICE_ACCOUNT_JSON` — полный JSON ключа сервисного аккаунта
    - `GOOGLE_SHEETS_SPREADSHEET_ID` — ID таблицы Google Sheets
    - `API_BASE_URL` — публичный URL вашего backend
-2. Команда запуска backend:
+2. Команда запуска (запускает FastAPI **и** Telegram бота):
    ```bash
    uvicorn backend.main:app --host 0.0.0.0 --port 8000
    ```
 3. Файл `.env` и файлы ключей (`credentials.json`, `service_account.json`)
    **не нужны** на сервере — все значения берутся из переменных окружения.
-4. Убедитесь, что `WEBAPP_URL` указывает на реальный URL Mini App, а
+4. Убедитесь, что `WEBAPP_URL` указывает на реальный HTTPS URL Mini App, а
    `API_BASE_URL` — на реальный URL backend.
 
 > **Безопасность:** Никогда не коммитьте реальные токены и ключи в репозиторий.

@@ -1,15 +1,22 @@
 """
 Telegram bot entry point for tg_bot_finans.
+
+Can be run standalone for development:
+    python -m bot.main
+
+In production, the bot is started automatically via FastAPI lifespan in
+backend/main.py when running:
+    uvicorn backend.main:app --host 0.0.0.0 --port 8000
 """
 
+import asyncio
 import logging
-import os
 
-from telegram.ext import Application
+from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
 
-from backend.config import BOT_TOKEN
-from bot.handlers import register_handlers
-from config.config import validate_settings
+from bot.handlers import router
+from config.config import settings, validate_settings
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -18,18 +25,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
+async def main() -> None:
     validate_settings()
 
-    if not BOT_TOKEN:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set")
-
-    application = Application.builder().token(BOT_TOKEN).build()
-    register_handlers(application)
+    bot = Bot(token=settings.telegram_bot_token)
+    dp = Dispatcher(storage=MemoryStorage())
+    dp.include_router(router)
 
     logger.info("Bot started. Polling...")
-    application.run_polling(drop_pending_updates=True)
+    await dp.start_polling(bot, skip_updates=True)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
