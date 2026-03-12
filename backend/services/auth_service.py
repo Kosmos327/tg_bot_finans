@@ -52,7 +52,7 @@ def verify_init_data(init_data: str) -> dict:
     # HMAC key = HMAC-SHA256("WebAppData", bot_token)
     secret_key = hmac.new(
         key=b"WebAppData",
-        msg=settings.bot_token.encode(),
+        msg=settings.telegram_bot_token.encode(),
         digestmod=hashlib.sha256,
     ).digest()
 

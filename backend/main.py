@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.routers import deals, settings, auth
+from backend.routers import deals, settings, auth, dashboard, journal
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,6 +30,8 @@ app.add_middleware(
 app.include_router(deals.router)
 app.include_router(settings.router)
 app.include_router(auth.router)
+app.include_router(dashboard.router)
+app.include_router(journal.router)
 
 # Serve miniapp static files if directory exists
 _miniapp_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "miniapp")
