@@ -29,10 +29,30 @@ tg_bot_finans/
 
 ---
 
-## Быстрый старт
+## Переменные окружения
 
-1. Скопируйте `.env.example` в `.env` и заполните переменные.
-2. Поместите файл ключа сервисного аккаунта Google (JSON) в корень проекта.
+| Переменная                      | Описание                                                         |
+|---------------------------------|------------------------------------------------------------------|
+| `TELEGRAM_BOT_TOKEN`            | Токен бота от @BotFather                                         |
+| `WEBAPP_URL`                    | Публичный HTTPS URL Mini App (например `https://app.example.com`) |
+| `GOOGLE_SERVICE_ACCOUNT_JSON`   | **Полное содержимое** JSON-ключа сервисного аккаунта Google      |
+| `GOOGLE_SHEETS_SPREADSHEET_ID`  | ID Google Spreadsheet                                            |
+| `API_BASE_URL`                  | Публичный URL backend API (например `https://api.example.com`)   |
+
+> **Важно:** Файл `credentials.json` или `service_account.json` **не требуется**.
+> Весь JSON ключа сервисного аккаунта передаётся через переменную
+> `GOOGLE_SERVICE_ACCOUNT_JSON`.
+
+---
+
+## Быстрый старт (локальная разработка)
+
+1. Скопируйте `.env.example` в `.env` и заполните все переменные:
+   ```bash
+   cp .env.example .env
+   ```
+2. В `GOOGLE_SERVICE_ACCOUNT_JSON` вставьте полное содержимое JSON-ключа
+   сервисного аккаунта (в одну строку или как многострочный JSON).
 3. Установите зависимости:
    ```bash
    pip install -r requirements.txt
@@ -45,6 +65,39 @@ tg_bot_finans/
    ```bash
    python -m bot.bot
    ```
+
+---
+
+## Деплой на Timeweb
+
+1. В панели Timeweb App добавьте переменные окружения:
+   - `TELEGRAM_BOT_TOKEN` — токен бота
+   - `WEBAPP_URL` — URL Mini App (должен быть HTTPS)
+   - `GOOGLE_SERVICE_ACCOUNT_JSON` — полный JSON ключа сервисного аккаунта
+   - `GOOGLE_SHEETS_SPREADSHEET_ID` — ID таблицы Google Sheets
+   - `API_BASE_URL` — публичный URL вашего backend
+2. Команда запуска backend:
+   ```bash
+   uvicorn backend.main:app --host 0.0.0.0 --port 8000
+   ```
+3. Файл `.env` и файлы ключей (`credentials.json`, `service_account.json`)
+   **не нужны** на сервере — все значения берутся из переменных окружения.
+4. Убедитесь, что `WEBAPP_URL` указывает на реальный URL Mini App, а
+   `API_BASE_URL` — на реальный URL backend.
+
+> **Безопасность:** Никогда не коммитьте реальные токены и ключи в репозиторий.
+> `.env` и файлы ключей добавлены в `.gitignore`.
+
+---
+
+## Настройка GOOGLE_SERVICE_ACCOUNT_JSON
+
+1. Создайте проект в [Google Cloud Console](https://console.cloud.google.com/).
+2. Включите **Google Sheets API** и **Google Drive API**.
+3. Создайте **Service Account** и скачайте JSON-ключ.
+4. Поделитесь таблицей с email сервисного аккаунта (роль «Редактор»).
+5. Скопируйте **всё содержимое** JSON-файла в переменную окружения
+   `GOOGLE_SERVICE_ACCOUNT_JSON`.
 
 ---
 
@@ -289,25 +342,3 @@ pytest tests/ -v
 - Парсер секций листа «Настройки»
 - Матрица прав по ролям
 - Фильтрация сделок
-
----
-
-## Переменные окружения
-
-| Переменная                    | Описание                                     |
-|-------------------------------|----------------------------------------------|
-| `TELEGRAM_BOT_TOKEN`          | Токен бота от @BotFather                     |
-| `WEBAPP_URL`                  | URL Mini App (HTTPS)                         |
-| `GOOGLE_SERVICE_ACCOUNT_FILE` | Путь к JSON-ключу сервисного аккаунта        |
-| `GOOGLE_SHEETS_SPREADSHEET_ID`| ID Google Spreadsheet                        |
-| `API_BASE_URL`                | Базовый URL backend API                      |
-
----
-
-## Настройка Google Sheets API
-
-1. Создайте проект в [Google Cloud Console](https://console.cloud.google.com/).
-2. Включите **Google Sheets API** и **Google Drive API**.
-3. Создайте **Service Account** и скачайте JSON-ключ.
-4. Сохраните ключ как `service_account.json` в корне проекта.
-5. Поделитесь таблицей с email сервисного аккаунта (роль «Редактор»).

@@ -18,6 +18,7 @@ env/
 # Secrets & credentials
 .env
 credentials.json
+service_account.json
 
 # pytest
 .pytest_cache/

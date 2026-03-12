@@ -5,9 +5,9 @@ Usage
 -----
 Set the following environment variables (or add them to a ``.env`` file):
 
-    BOT_TOKEN=<telegram bot token>
-    SPREADSHEET_ID=<google spreadsheet id>
-    GOOGLE_CREDENTIALS_FILE=credentials.json   # default
+    TELEGRAM_BOT_TOKEN=<telegram bot token>
+    GOOGLE_SHEETS_SPREADSHEET_ID=<google spreadsheet id>
+    GOOGLE_SERVICE_ACCOUNT_JSON=<full JSON content of service account key>
     DEALS_SHEET=Сделки                         # default
     JOURNAL_SHEET=Журнал действий              # default
     DEAL_ID_PREFIX=DEAL-                       # default
@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 
 
 async def main() -> None:
-    client = build_client(config.GOOGLE_CREDENTIALS_FILE)
+    client = build_client(config.GOOGLE_SERVICE_ACCOUNT_JSON)
     spreadsheet = open_spreadsheet(client, config.SPREADSHEET_ID)
 
     deals_ws = spreadsheet.worksheet(config.DEALS_SHEET)

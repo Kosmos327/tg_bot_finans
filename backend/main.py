@@ -6,12 +6,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.routers import deals, settings, auth, dashboard, journal
+from config.config import validate_settings
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# Validate required environment variables at startup
+validate_settings()
 
 app = FastAPI(
     title="Финансовая система API",

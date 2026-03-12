@@ -9,6 +9,7 @@ from telegram.ext import Application
 
 from backend.config import BOT_TOKEN
 from bot.handlers import register_handlers
+from config.config import validate_settings
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -18,8 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    validate_settings()
+
     if not BOT_TOKEN:
-        raise RuntimeError("BOT_TOKEN environment variable is not set")
+        raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set")
 
     application = Application.builder().token(BOT_TOKEN).build()
     register_handlers(application)

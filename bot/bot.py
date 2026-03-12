@@ -4,7 +4,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from config.config import settings
+from config.config import settings, validate_settings
 from bot.handlers import router
 
 logging.basicConfig(
@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
+    validate_settings()
     bot = Bot(token=settings.telegram_bot_token)
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)

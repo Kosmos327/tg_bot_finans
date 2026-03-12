@@ -6,13 +6,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Telegram
-BOT_TOKEN: str = os.environ["BOT_TOKEN"]
+BOT_TOKEN: str = os.environ["TELEGRAM_BOT_TOKEN"]
 
 # Google Sheets
-SPREADSHEET_ID: str = os.environ["SPREADSHEET_ID"]
-GOOGLE_CREDENTIALS_FILE: str = os.environ.get(
-    "GOOGLE_CREDENTIALS_FILE", "credentials.json"
-)
+SPREADSHEET_ID: str = os.environ["GOOGLE_SHEETS_SPREADSHEET_ID"]
+GOOGLE_SERVICE_ACCOUNT_JSON: str = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
 
 # Sheet names
 DEALS_SHEET: str = os.environ.get("DEALS_SHEET", "Сделки")

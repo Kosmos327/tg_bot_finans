@@ -7,6 +7,7 @@ Wraps gspread calls and provides typed accessors for:
   - Журнал действий (audit journal)
 """
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -36,7 +37,6 @@ from backend.config import (
     DEAL_COL_VAR_EXP1,
     DEAL_COL_VAR_EXP2,
     DEALS_TOTAL_COLS,
-    GOOGLE_CREDENTIALS_FILE,
     JOURNAL_COL_ACTION,
     JOURNAL_COL_CHANGED_FIELDS,
     JOURNAL_COL_DEAL_ID,
@@ -74,7 +74,19 @@ def _col_letter(col_index: int) -> str:
 
 
 def _get_client() -> gspread.Client:
-    creds = Credentials.from_service_account_file(GOOGLE_CREDENTIALS_FILE, scopes=_SCOPES)
+    import os
+    raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    if not raw_json:
+        raise RuntimeError(
+            "GOOGLE_SERVICE_ACCOUNT_JSON environment variable is not set."
+        )
+    try:
+        service_account_info = json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "GOOGLE_SERVICE_ACCOUNT_JSON contains invalid JSON."
+        ) from exc
+    creds = Credentials.from_service_account_info(service_account_info, scopes=_SCOPES)
     return gspread.authorize(creds)
 
 
