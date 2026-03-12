@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Финансовый ERP</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Splash screen -->
+    <div class="splash" id="splash">
+      <div class="splash-inner">
+        <div class="splash-logo">💼</div>
+        <div class="splash-title">Финансовый ERP</div>
+        <div class="splash-spinner"></div>
+      </div>
+    </div>
+
+    <!-- Role selector (demo / fallback) -->
+    <div id="role-selector" class="role-selector hidden">
+      <div class="role-selector-header">
+        <div class="role-selector-logo">💼</div>
+        <h2 class="role-selector-title">Финансовый ERP</h2>
+        <p class="role-selector-sub">Выберите роль для входа в систему</p>
+      </div>
+      <div class="role-selector-grid">
+        <button class="role-btn role-btn--manager" onclick="App.selectRole('manager')">
+          <span class="role-btn__icon">👤</span>
+          <span class="role-btn__label">Менеджер</span>
+          <span class="role-btn__desc">Личные сделки и задачи</span>
+        </button>
+        <button class="role-btn role-btn--accountant" onclick="App.selectRole('accountant')">
+          <span class="role-btn__icon">📊</span>
+          <span class="role-btn__label">Бухгалтер</span>
+          <span class="role-btn__desc">Платежи и счета</span>
+        </button>
+        <button class="role-btn role-btn--opdir" onclick="App.selectRole('opdir')">
+          <span class="role-btn__icon">🏢</span>
+          <span class="role-btn__label">Оп. директор</span>
+          <span class="role-btn__desc">Операционный контроль</span>
+        </button>
+        <button class="role-btn role-btn--rop" onclick="App.selectRole('rop')">
+          <span class="role-btn__icon">🎯</span>
+          <span class="role-btn__label">РОП</span>
+          <span class="role-btn__desc">Управление продажами</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Main App Shell -->
+    <div id="main-app" class="main-app hidden">
+
+      <!-- Header -->
+      <header class="app-header" id="app-header">
+        <div class="header-row">
+          <div class="header-user">
+            <div class="header-avatar" id="header-avatar">А</div>
+            <div class="header-meta">
+              <div class="header-name" id="header-name">Пользователь</div>
+              <div class="header-role-badge" id="header-role-badge">—</div>
+            </div>
+          </div>
+          <div class="header-right">
+            <button class="header-icon-btn" id="notif-btn" aria-label="Уведомления">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+              <span class="notif-dot hidden" id="notif-dot"></span>
+            </button>
+            <button class="header-icon-btn header-icon-btn--demo" id="switch-role-btn" aria-label="Сменить роль" title="Сменить роль">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="17 1 21 5 17 9"/>
+                <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+                <polyline points="7 23 3 19 7 15"/>
+                <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- KPI Summary Row -->
+        <div class="kpi-summary" id="kpi-summary">
+          <!-- Injected by JS -->
+        </div>
+      </header>
+
+      <!-- Tab bar -->
+      <nav class="tab-bar" id="tab-bar">
+        <!-- Injected by JS -->
+      </nav>
+
+      <!-- Main scrollable content -->
+      <main class="app-content" id="app-content">
+        <!-- Injected by JS -->
+      </main>
+
+      <!-- Bottom navigation -->
+      <nav class="bottom-nav" id="bottom-nav">
+        <!-- Injected by JS -->
+      </nav>
+
+      <!-- Sticky action bar (optional per role) -->
+      <div class="sticky-actions hidden" id="sticky-actions">
+        <!-- Injected by JS -->
+      </div>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+  <!-- Telegram Web App SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
