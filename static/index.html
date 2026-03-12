@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>ERP Сделки</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    /* =====================================================================
+       CSS Reset & Telegram theme variables
+       ===================================================================== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          var(--tg-theme-bg-color,          #ffffff);
+      --bg2:         var(--tg-theme-secondary-bg-color,#f4f4f5);
+      --text:        var(--tg-theme-text-color,        #000000);
+      --hint:        var(--tg-theme-hint-color,        #707579);
+      --link:        var(--tg-theme-link-color,        #2481cc);
+      --btn:         var(--tg-theme-button-color,      #2481cc);
+      --btn-text:    var(--tg-theme-button-text-color, #ffffff);
+      --radius:      12px;
+      --nav-h:       60px;
+      --header-h:    52px;
+      --green:       #31b545;
+      --red:         #e53935;
+      --yellow:      #f9a825;
+      --blue:        #2481cc;
+      --shadow:      0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg2);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* =====================================================================
+       Layout
+       ===================================================================== */
+    #app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+    #header {
+      flex-shrink: 0;
+      height: var(--header-h);
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      border-bottom: 1px solid rgba(0,0,0,0.06);
+      box-shadow: var(--shadow);
+      z-index: 10;
+    }
+    #header-title { font-size: 17px; font-weight: 600; }
+    #header-user {
+      font-size: 12px;
+      color: var(--hint);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #header-user .role-badge {
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--btn);
+      color: var(--btn-text);
+    }
+    #header-user .role-badge.accountant { background: var(--green); }
+
+    #screens {
+      flex: 1;
+      overflow-y: auto;
+      padding-bottom: 8px;
+    }
+
+    .screen { display: none; padding: 12px 12px 0; }
+    .screen.active { display: block; }
+
+    /* =====================================================================
+       Bottom navigation
+       ===================================================================== */
+    #bottom-nav {
+      flex-shrink: 0;
+      height: var(--nav-h);
+      background: var(--bg);
+      border-top: 1px solid rgba(0,0,0,0.06);
+      display: flex;
+      align-items: stretch;
+      z-index: 10;
+    }
+    .nav-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      cursor: pointer;
+      color: var(--hint);
+      transition: color .2s;
+      background: none;
+      border: none;
+      font-size: 10px;
+      font-weight: 500;
+      padding: 0;
+    }
+    .nav-item.active { color: var(--btn); }
+    .nav-item svg { width: 22px; height: 22px; }
+
+    /* =====================================================================
+       Cards
+       ===================================================================== */
+    .card {
+      background: var(--bg);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-bottom: 10px;
+      box-shadow: var(--shadow);
+    }
+    .card-title {
+      font-size: 13px;
+      color: var(--hint);
+      margin-bottom: 4px;
+    }
+    .card-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .card-value.money { font-size: 20px; }
+
+    /* KPI grid */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .kpi-grid .card { margin-bottom: 0; }
+    .kpi-grid .card-wide { grid-column: span 2; }
+
+    .kpi-icon {
+      font-size: 24px;
+      margin-bottom: 6px;
+      display: block;
+    }
+
+    /* =====================================================================
+       Section header
+       ===================================================================== */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .section-title { font-size: 16px; font-weight: 600; }
+    .btn-sm {
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: none;
+      background: var(--btn);
+      color: var(--btn-text);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .btn-sm.outlined {
+      background: transparent;
+      border: 1.5px solid var(--btn);
+      color: var(--btn);
+    }
+
+    /* =====================================================================
+       Deal list item
+       ===================================================================== */
+    .deal-item {
+      background: var(--bg);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      box-shadow: var(--shadow);
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    .deal-item:active { opacity: .7; }
+
+    .deal-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .deal-name {
+      font-size: 15px;
+      font-weight: 600;
+      flex: 1;
+      line-height: 1.3;
+    }
+    .status-badge {
+      flex-shrink: 0;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .status-active   { background: #e3f2fd; color: #1565c0; }
+    .status-completed { background: #e8f5e9; color: #2e7d32; }
+
+    .deal-meta {
+      font-size: 12px;
+      color: var(--hint);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 12px;
+      margin-bottom: 8px;
+    }
+    .deal-meta span { display: flex; align-items: center; gap: 3px; }
+
+    .deal-amounts {
+      display: flex;
+      gap: 12px;
+      font-size: 13px;
+    }
+    .deal-amounts .amount-label { color: var(--hint); font-size: 11px; }
+    .deal-amounts .amount-val { font-weight: 600; }
+    .deal-amounts .paid { color: var(--green); }
+    .deal-amounts .charged { color: var(--blue); }
+
+    .deal-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 8px;
+    }
+    .edit-btn {
+      background: var(--bg2);
+      border: none;
+      border-radius: 8px;
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--btn);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    /* =====================================================================
+       Filters
+       ===================================================================== */
+    .filter-bar {
+      background: var(--bg);
+      border-radius: var(--radius);
+      padding: 12px;
+      margin-bottom: 10px;
+      box-shadow: var(--shadow);
+    }
+    .filter-bar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .filter-bar-header .arrow { transition: transform .2s; display: inline-block; }
+    .filter-bar-header .arrow.open { transform: rotate(180deg); }
+    .filter-fields { display: none; margin-top: 10px; }
+    .filter-fields.open { display: flex; flex-direction: column; gap: 8px; }
+
+    /* =====================================================================
+       Form
+       ===================================================================== */
+    .form-group {
+      margin-bottom: 12px;
+    }
+    .form-label {
+      display: block;
+      font-size: 12px;
+      color: var(--hint);
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+    .form-label .required { color: var(--red); margin-left: 2px; }
+    .form-label .role-tag {
+      font-size: 10px;
+      background: var(--bg2);
+      color: var(--hint);
+      border-radius: 4px;
+      padding: 1px 5px;
+      margin-left: 4px;
+    }
+
+    .form-control {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg);
+      border: 1.5px solid rgba(0,0,0,0.10);
+      border-radius: 10px;
+      font-size: 14px;
+      color: var(--text);
+      outline: none;
+      transition: border-color .2s;
+      -webkit-appearance: none;
+    }
+    .form-control:focus { border-color: var(--btn); }
+    .form-control:disabled {
+      background: var(--bg2);
+      color: var(--hint);
+      cursor: not-allowed;
+      border-color: transparent;
+    }
+    select.form-control { cursor: pointer; }
+
+    .btn-primary {
+      width: 100%;
+      padding: 14px;
+      background: var(--btn);
+      color: var(--btn-text);
+      border: none;
+      border-radius: var(--radius);
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: opacity .15s;
+    }
+    .btn-primary:active { opacity: .8; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+    .form-section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--hint);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin: 16px 0 10px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid rgba(0,0,0,0.06);
+    }
+
+    /* =====================================================================
+       Journal
+       ===================================================================== */
+    .journal-item {
+      background: var(--bg);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      box-shadow: var(--shadow);
+    }
+    .journal-item-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+    .journal-action { font-weight: 600; font-size: 14px; }
+    .journal-time { font-size: 11px; color: var(--hint); }
+    .journal-user { font-size: 12px; color: var(--hint); margin-bottom: 4px; }
+    .journal-details { font-size: 12px; color: var(--hint); font-style: italic; }
+
+    /* =====================================================================
+       Loading / spinner
+       ===================================================================== */
+    #loading-screen {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 100;
+    }
+    #loading-screen.hidden { display: none; }
+
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid var(--bg2);
+      border-top-color: var(--btn);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-text { color: var(--hint); font-size: 14px; }
+
+    /* =====================================================================
+       Toast notification
+       ===================================================================== */
+    #toast {
+      position: fixed;
+      bottom: calc(var(--nav-h) + 12px);
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(0,0,0,0.82);
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-size: 14px;
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity .25s, transform .25s;
+      pointer-events: none;
+      z-index: 200;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* =====================================================================
+       Misc
+       ===================================================================== */
+    .empty-state {
+      text-align: center;
+      color: var(--hint);
+      padding: 48px 24px;
+    }
+    .empty-state .emoji { font-size: 48px; margin-bottom: 12px; }
+    .empty-state p { font-size: 15px; }
+
+    .inline-loading {
+      text-align: center;
+      color: var(--hint);
+      padding: 32px;
+    }
+
+    .demo-banner {
+      background: #fff3e0;
+      color: #e65100;
+      text-align: center;
+      font-size: 12px;
+      padding: 6px;
+      font-weight: 500;
+    }
+
+    /* Subtle divider */
+    .divider { height: 1px; background: rgba(0,0,0,0.06); margin: 8px 0; }
+
+    /* Stretch to fill remaining space to push form button down */
+    .spacer { flex: 1; }
+  </style>
+</head>
+<body>
+
+<!-- =========================================================
+     LOADING SCREEN
+     ========================================================= -->
+<div id="loading-screen">
+  <div class="spinner"></div>
+  <div class="loading-text">Загрузка…</div>
+</div>
+
+<!-- =========================================================
+     MAIN APP
+     ========================================================= -->
+<div id="app" style="display:none">
+
+  <!-- Demo mode banner -->
+  <div id="demo-banner" class="demo-banner" style="display:none">
+    🛠 Демо-режим — данные не сохраняются в Google Таблицах
+  </div>
+
+  <!-- Header -->
+  <div id="header">
+    <span id="header-title">ERP Сделки</span>
+    <span id="header-user">
+      <span id="user-name-label">…</span>
+      <span id="role-badge" class="role-badge">менеджер</span>
+    </span>
+  </div>
+
+  <!-- Screen container -->
+  <div id="screens">
+
+    <!-- ===================================================
+         SCREEN: DASHBOARD
+         =================================================== -->
+    <div id="screen-dashboard" class="screen">
+      <div id="kpi-section">
+        <div class="inline-loading">
+          <div class="spinner" style="margin:auto"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================================================
+         SCREEN: DEALS LIST
+         =================================================== -->
+    <div id="screen-deals" class="screen">
+
+      <!-- Filter bar -->
+      <div class="filter-bar">
+        <div class="filter-bar-header" id="filter-toggle">
+          <span>🔍 Фильтры</span>
+          <span class="arrow" id="filter-arrow">▼</span>
+        </div>
+        <div class="filter-fields" id="filter-fields">
+          <select class="form-control" id="f-manager">
+            <option value="">Все менеджеры</option>
+          </select>
+          <select class="form-control" id="f-client">
+            <option value="">Все клиенты</option>
+          </select>
+          <select class="form-control" id="f-status">
+            <option value="">Все статусы</option>
+            <option value="Активная">Активная</option>
+            <option value="Завершённая">Завершённая</option>
+          </select>
+          <input type="month" class="form-control" id="f-month" placeholder="Месяц" />
+          <div style="display:flex;gap:8px">
+            <input type="date" class="form-control" id="f-date-from" placeholder="Дата от" style="flex:1" />
+            <input type="date" class="form-control" id="f-date-to" placeholder="Дата до" style="flex:1" />
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn-sm" onclick="applyFilters()">Применить</button>
+            <button class="btn-sm outlined" onclick="clearFilters()">Сбросить</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="deals-list">
+        <div class="inline-loading">
+          <div class="spinner" style="margin:auto"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================================================
+         SCREEN: DEAL FORM (ADD / EDIT)
+         =================================================== -->
+    <div id="screen-form" class="screen">
+      <div class="card" style="margin-bottom:12px">
+        <div class="form-section-title" id="form-section-main">Основная информация</div>
+
+        <div class="form-group">
+          <label class="form-label">Менеджер <span class="required">*</span>
+            <span class="role-tag" id="mgr-tag"></span>
+          </label>
+          <input type="text" class="form-control" id="field-manager" placeholder="ФИО менеджера" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Клиент <span class="required">*</span></label>
+          <input type="text" class="form-control" id="field-client" placeholder="Название организации" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Название сделки <span class="required">*</span></label>
+          <input type="text" class="form-control" id="field-deal-name" placeholder="Краткое название" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Статус</label>
+          <select class="form-control" id="field-status">
+            <option value="Активная">Активная</option>
+            <option value="Завершённая">Завершённая</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Описание</label>
+          <textarea class="form-control" id="field-desc" rows="3" placeholder="Описание сделки…"
+            style="resize:none"></textarea>
+        </div>
+
+        <div class="form-section-title">Финансы
+          <span class="role-tag" id="fin-tag" style="display:none">только бухгалтер</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Сумма начислено, ₽</label>
+          <input type="number" class="form-control" id="field-charged" placeholder="0" min="0" step="0.01" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Сумма оплачено, ₽</label>
+          <input type="number" class="form-control" id="field-paid" placeholder="0" min="0" step="0.01" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Дата акта</label>
+          <input type="date" class="form-control" id="field-act-date" />
+        </div>
+      </div>
+
+      <button class="btn-primary" id="form-submit-btn" onclick="submitDealForm()">
+        Сохранить сделку
+      </button>
+      <div style="height:16px"></div>
+    </div>
+
+    <!-- ===================================================
+         SCREEN: JOURNAL
+         =================================================== -->
+    <div id="screen-journal" class="screen">
+      <div id="journal-list">
+        <div class="inline-loading">
+          <div class="spinner" style="margin:auto"></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /screens -->
+
+  <!-- Bottom navigation -->
+  <nav id="bottom-nav">
+    <button class="nav-item active" data-screen="dashboard" onclick="navigate('dashboard')">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+      Дашборд
+    </button>
+    <button class="nav-item" data-screen="deals" onclick="navigate('deals')">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+      Сделки
+    </button>
+    <button class="nav-item" data-screen="form" onclick="openAddForm()">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+      Добавить
+    </button>
+    <button class="nav-item" data-screen="journal" onclick="navigate('journal')">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/></svg>
+      Журнал
+    </button>
+  </nav>
+
+</div><!-- /app -->
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- =========================================================
+     JAVASCRIPT
+     ========================================================= -->
+<script>
+// -------------------------------------------------------
+// App state
+// -------------------------------------------------------
+const state = {
+  user: null,        // Telegram user object
+  role: 'manager',   // 'manager' | 'accountant'
+  userName: 'Пользователь',
+  currentScreen: 'dashboard',
+  deals: [],
+  dealsById: {},     // id -> deal object, for safe lookup without inline JSON
+  editingDealId: null,  // null = adding new deal
+  demoMode: false,
+};
+
+// -------------------------------------------------------
+// Telegram WebApp bootstrap
+// -------------------------------------------------------
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) {
+  tg.ready();
+  tg.expand();
+}
+
+function getTgUser() {
+  if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
+    return tg.initDataUnsafe.user;
+  }
+  // Fallback for browser testing
+  return { id: '111111111', first_name: 'Тест', last_name: 'Пользователь', username: 'testuser' };
+}
+
+// -------------------------------------------------------
+// Initialise app
+// -------------------------------------------------------
+async function init() {
+  const user = getTgUser();
+  state.user = user;
+
+  const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
+
+  try {
+    const resp = await fetch(`/api/user-role?user_id=${user.id}&user_name=${encodeURIComponent(fullName)}`);
+    const data = await resp.json();
+    state.role = data.role || 'manager';
+    state.userName = data.name || fullName;
+  } catch (e) {
+    state.role = 'manager';
+    state.userName = fullName;
+  }
+
+  // Check demo mode
+  try {
+    const r = await fetch('/api/dashboard');
+    const d = await r.json();
+    state.demoMode = true; // if we got a response, check header
+    // We just rely on the backend to tell us
+  } catch (e) {}
+
+  // Update header
+  document.getElementById('user-name-label').textContent = state.userName;
+  const badge = document.getElementById('role-badge');
+  badge.textContent = state.role === 'accountant' ? 'бухгалтер' : 'менеджер';
+  if (state.role === 'accountant') badge.classList.add('accountant');
+
+  // Show app
+  document.getElementById('loading-screen').classList.add('hidden');
+  document.getElementById('app').style.display = 'flex';
+  document.getElementById('app').style.flexDirection = 'column';
+  document.getElementById('app').style.height = '100vh';
+
+  // Load filter options in background
+  loadFilterOptions();
+
+  // Navigate to dashboard
+  navigate('dashboard');
+
+  // Check demo mode via a simple heuristic
+  checkDemoMode();
+}
+
+async function checkDemoMode() {
+  try {
+    const r = await fetch('/api/deals');
+    // If the response is successful we're running
+    // Show demo banner based on DEMO_MODE env (server sets x-demo header if needed)
+    // For simplicity, show it always when we can reach the server
+    // We rely on the server to know
+    const data = await r.json();
+    if (!Array.isArray(data)) return;
+    // Small heuristic: if data contains DEAL001 it's demo data
+    if (data.some(d => d.id === 'DEAL001')) {
+      document.getElementById('demo-banner').style.display = 'block';
+    }
+  } catch (e) {}
+}
+
+// -------------------------------------------------------
+// Navigation
+// -------------------------------------------------------
+function navigate(screen) {
+  document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+
+  document.getElementById('screen-' + screen).classList.add('active');
+  const navBtn = document.querySelector(`.nav-item[data-screen="${screen}"]`);
+  if (navBtn) navBtn.classList.add('active');
+
+  state.currentScreen = screen;
+
+  if (screen === 'dashboard') loadDashboard();
+  if (screen === 'deals') loadDeals();
+  if (screen === 'journal') loadJournal();
+}
+
+function openAddForm() {
+  state.editingDealId = null;
+  resetForm();
+  navigate('form');
+}
+
+function openEditForm(deal) {
+  state.editingDealId = deal.id;
+  populateForm(deal);
+  navigate('form');
+}
+
+// -------------------------------------------------------
+// DASHBOARD
+// -------------------------------------------------------
+async function loadDashboard() {
+  const container = document.getElementById('kpi-section');
+  container.innerHTML = '<div class="inline-loading"><div class="spinner" style="margin:auto"></div></div>';
+  try {
+    const r = await fetch('/api/dashboard');
+    const d = await r.json();
+    renderDashboard(d);
+  } catch (e) {
+    container.innerHTML = '<div class="empty-state"><div class="emoji">⚠️</div><p>Ошибка загрузки</p></div>';
+  }
+}
+
+function fmt(n) {
+  if (!n && n !== 0) return '—';
+  const num = parseFloat(n);
+  if (isNaN(num)) return '—';
+  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(num);
+}
+
+function renderDashboard(d) {
+  const container = document.getElementById('kpi-section');
+  container.innerHTML = `
+    <div class="section-header" style="margin-bottom:12px">
+      <span class="section-title">📊 Дашборд</span>
+    </div>
+    <div class="kpi-grid">
+      <div class="card">
+        <span class="kpi-icon">📁</span>
+        <div class="card-title">Всего сделок</div>
+        <div class="card-value">${d.total ?? 0}</div>
+      </div>
+      <div class="card">
+        <span class="kpi-icon">🔵</span>
+        <div class="card-title">Активные</div>
+        <div class="card-value" style="color:var(--blue)">${d.active ?? 0}</div>
+      </div>
+      <div class="card">
+        <span class="kpi-icon">✅</span>
+        <div class="card-title">Завершённые</div>
+        <div class="card-value" style="color:var(--green)">${d.completed ?? 0}</div>
+      </div>
+      <div class="card" style="grid-column:span 1">
+        <span class="kpi-icon">📈</span>
+        <div class="card-title">% оплачено</div>
+        <div class="card-value">${d.total_charged > 0 ? Math.round(d.total_paid / d.total_charged * 100) : 0}%</div>
+      </div>
+      <div class="card card-wide">
+        <span class="kpi-icon">💰</span>
+        <div class="card-title">Сумма начислено</div>
+        <div class="card-value money" style="color:var(--blue)">${fmt(d.total_charged)} ₽</div>
+      </div>
+      <div class="card card-wide">
+        <span class="kpi-icon">✅</span>
+        <div class="card-title">Сумма оплачено</div>
+        <div class="card-value money" style="color:var(--green)">${fmt(d.total_paid)} ₽</div>
+      </div>
+    </div>
+  `;
+}
+
+// -------------------------------------------------------
+// DEALS LIST
+// -------------------------------------------------------
+async function loadDeals(filters = {}) {
+  const container = document.getElementById('deals-list');
+  container.innerHTML = '<div class="inline-loading"><div class="spinner" style="margin:auto"></div></div>';
+
+  const params = new URLSearchParams();
+  if (filters.manager) params.set('manager', filters.manager);
+  if (filters.client) params.set('client', filters.client);
+  if (filters.status) params.set('status', filters.status);
+  if (filters.month) params.set('month', filters.month);
+  if (filters.date_from) params.set('date_from', filters.date_from);
+  if (filters.date_to) params.set('date_to', filters.date_to);
+
+  // Manager can only see their own deals (filter enforced server-side conceptually,
+  // here we filter on the frontend as well for simplicity)
+  if (state.role === 'manager') {
+    params.set('manager', state.userName);
+  }
+
+  try {
+    const r = await fetch('/api/deals?' + params.toString());
+    const deals = await r.json();
+    if (!Array.isArray(deals)) throw new Error(deals.error || 'Bad response');
+    state.deals = deals;
+    renderDeals(deals);
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state"><div class="emoji">⚠️</div><p>${e.message}</p></div>`;
+  }
+}
+
+function renderDeals(deals) {
+  const container = document.getElementById('deals-list');
+  if (deals.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="emoji">📭</div><p>Сделки не найдены</p></div>';
+    return;
+  }
+
+  // Build lookup map so click handlers can retrieve full deal objects by ID
+  state.dealsById = {};
+  deals.forEach(d => { state.dealsById[d.id] = d; });
+
+  container.innerHTML = deals.map(d => `
+    <div class="deal-item" data-deal-id="${escHtml(d.id)}">
+      <div class="deal-header">
+        <span class="deal-name">${escHtml(d.deal_name || '—')}</span>
+        <span class="status-badge ${d.status === 'Активная' ? 'status-active' : 'status-completed'}">
+          ${escHtml(d.status || '')}
+        </span>
+      </div>
+      <div class="deal-meta">
+        <span>👤 ${escHtml(d.manager || '—')}</span>
+        <span>🏢 ${escHtml(d.client || '—')}</span>
+        <span>📅 ${escHtml(d.created_at || '—')}</span>
+      </div>
+      ${d.amount_charged || d.amount_paid ? `
+      <div class="deal-amounts">
+        <div>
+          <div class="amount-label">Начислено</div>
+          <div class="amount-val charged">${fmt(d.amount_charged)} ₽</div>
+        </div>
+        <div>
+          <div class="amount-label">Оплачено</div>
+          <div class="amount-val paid">${fmt(d.amount_paid)} ₽</div>
+        </div>
+      </div>` : ''}
+      <div class="deal-actions">
+        <button class="edit-btn" data-deal-id="${escHtml(d.id)}">✏️ Редактировать</button>
+      </div>
+    </div>
+  `).join('');
+
+  // Attach event listeners using data attributes to avoid inline JSON encoding issues
+  container.querySelectorAll('.deal-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const deal = state.dealsById[el.dataset.dealId];
+      if (deal) openEditForm(deal);
+    });
+  });
+  container.querySelectorAll('.edit-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const deal = state.dealsById[btn.dataset.dealId];
+      if (deal) openEditForm(deal);
+    });
+  });
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Filter controls
+document.getElementById('filter-toggle').addEventListener('click', () => {
+  const fields = document.getElementById('filter-fields');
+  const arrow = document.getElementById('filter-arrow');
+  fields.classList.toggle('open');
+  arrow.classList.toggle('open');
+});
+
+function applyFilters() {
+  loadDeals({
+    manager: state.role === 'manager' ? state.userName : document.getElementById('f-manager').value,
+    client: document.getElementById('f-client').value,
+    status: document.getElementById('f-status').value,
+    month: document.getElementById('f-month').value,
+    date_from: document.getElementById('f-date-from').value,
+    date_to: document.getElementById('f-date-to').value,
+  });
+}
+
+function clearFilters() {
+  document.getElementById('f-manager').value = '';
+  document.getElementById('f-client').value = '';
+  document.getElementById('f-status').value = '';
+  document.getElementById('f-month').value = '';
+  document.getElementById('f-date-from').value = '';
+  document.getElementById('f-date-to').value = '';
+  loadDeals();
+}
+
+async function loadFilterOptions() {
+  try {
+    const [mgrResp, cliResp] = await Promise.all([
+      fetch('/api/managers'),
+      fetch('/api/clients'),
+    ]);
+    const managers = await mgrResp.json();
+    const clients = await cliResp.json();
+
+    const mgrSel = document.getElementById('f-manager');
+    managers.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      mgrSel.appendChild(opt);
+    });
+
+    const cliSel = document.getElementById('f-client');
+    clients.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c;
+      opt.textContent = c;
+      cliSel.appendChild(opt);
+    });
+  } catch (e) {
+    // Non-critical; filters will still work as text inputs
+  }
+}
+
+// -------------------------------------------------------
+// DEAL FORM
+// -------------------------------------------------------
+function resetForm() {
+  document.getElementById('field-manager').value = state.userName;
+  document.getElementById('field-client').value = '';
+  document.getElementById('field-deal-name').value = '';
+  document.getElementById('field-status').value = 'Активная';
+  document.getElementById('field-desc').value = '';
+  document.getElementById('field-charged').value = '';
+  document.getElementById('field-paid').value = '';
+  document.getElementById('field-act-date').value = '';
+
+  document.getElementById('form-submit-btn').textContent = 'Добавить сделку';
+  applyRoleToForm();
+}
+
+function populateForm(deal) {
+  document.getElementById('field-manager').value = deal.manager || '';
+  document.getElementById('field-client').value = deal.client || '';
+  document.getElementById('field-deal-name').value = deal.deal_name || '';
+  document.getElementById('field-status').value = deal.status || 'Активная';
+  document.getElementById('field-desc').value = deal.description || '';
+  document.getElementById('field-charged').value = deal.amount_charged || '';
+  document.getElementById('field-paid').value = deal.amount_paid || '';
+  document.getElementById('field-act-date').value = deal.act_date || '';
+
+  document.getElementById('form-submit-btn').textContent = 'Сохранить изменения';
+  applyRoleToForm();
+}
+
+function applyRoleToForm() {
+  const isAccountant = state.role === 'accountant';
+
+  // Manager field: only accountant can change who the manager is
+  document.getElementById('field-manager').disabled = !isAccountant;
+  const mgrTag = document.getElementById('mgr-tag');
+  mgrTag.textContent = isAccountant ? '' : 'только бухгалтер';
+  mgrTag.style.display = isAccountant ? 'none' : 'inline';
+
+  // Financial fields
+  const finFields = ['field-charged', 'field-paid', 'field-act-date'];
+  finFields.forEach(id => {
+    document.getElementById(id).disabled = !isAccountant;
+  });
+  const finTag = document.getElementById('fin-tag');
+  finTag.style.display = isAccountant ? 'none' : 'inline';
+}
+
+async function submitDealForm() {
+  const dealName = document.getElementById('field-deal-name').value.trim();
+  const client = document.getElementById('field-client').value.trim();
+
+  if (!dealName) { showToast('Введите название сделки'); return; }
+  if (!client) { showToast('Введите клиента'); return; }
+
+  const btn = document.getElementById('form-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Сохранение…';
+
+  const body = {
+    manager: document.getElementById('field-manager').value.trim() || state.userName,
+    client,
+    deal_name: dealName,
+    status: document.getElementById('field-status').value,
+    description: document.getElementById('field-desc').value.trim(),
+    amount_charged: document.getElementById('field-charged').value,
+    amount_paid: document.getElementById('field-paid').value,
+    act_date: document.getElementById('field-act-date').value,
+    user: state.userName,
+    role: state.role,
+  };
+
+  try {
+    let resp;
+    if (state.editingDealId) {
+      resp = await fetch('/api/deals/' + state.editingDealId, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } else {
+      resp = await fetch('/api/deals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    showToast(state.editingDealId ? '✅ Сделка обновлена' : '✅ Сделка добавлена');
+    navigate('deals');
+  } catch (e) {
+    showToast('❌ Ошибка: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = state.editingDealId ? 'Сохранить изменения' : 'Добавить сделку';
+  }
+}
+
+// -------------------------------------------------------
+// JOURNAL
+// -------------------------------------------------------
+async function loadJournal() {
+  const container = document.getElementById('journal-list');
+  container.innerHTML = '<div class="inline-loading"><div class="spinner" style="margin:auto"></div></div>';
+  try {
+    const r = await fetch('/api/journal');
+    const entries = await r.json();
+    renderJournal(entries);
+  } catch (e) {
+    container.innerHTML = '<div class="empty-state"><div class="emoji">⚠️</div><p>Ошибка загрузки</p></div>';
+  }
+}
+
+function renderJournal(entries) {
+  const container = document.getElementById('journal-list');
+
+  if (!entries.length) {
+    container.innerHTML = '<div class="empty-state"><div class="emoji">📋</div><p>Журнал пуст</p></div>';
+    return;
+  }
+
+  const actionIcon = {
+    'Создание сделки': '➕',
+    'Редактирование сделки': '✏️',
+  };
+
+  container.innerHTML = `
+    <div class="section-header" style="margin-bottom:10px">
+      <span class="section-title">📔 Журнал действий</span>
+    </div>
+    ${entries.map(e => `
+      <div class="journal-item">
+        <div class="journal-item-header">
+          <span class="journal-action">
+            ${actionIcon[e.action] || '🔔'} ${escHtml(e.action)}
+          </span>
+          <span class="journal-time">${escHtml(e.timestamp)}</span>
+        </div>
+        <div class="journal-user">👤 ${escHtml(e.user)}</div>
+        ${e.details ? `<div class="journal-details">${escHtml(e.details)}</div>` : ''}
+      </div>
+    `).join('')}
+  `;
+}
+
+// -------------------------------------------------------
+// Toast
+// -------------------------------------------------------
+let toastTimer = null;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+// -------------------------------------------------------
+// Start
+// -------------------------------------------------------
+init();
+</script>
+</body>
+</html>
