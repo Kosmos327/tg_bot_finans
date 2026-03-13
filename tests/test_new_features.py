@@ -259,7 +259,8 @@ class TestDealFinancials:
         from backend.services.deals_service import _calculate_deal_financials
         payload = {"charged_with_vat": 1200.0, "vat_rate": 0.0}
         result = _calculate_deal_financials(payload)
-        # No vat_rate → no auto-calc
+        # vat_rate=0.0 is falsy → skip auto-calc (no VAT means nothing to break down)
+        # amount_without_vat and vat_amount are not populated when vat_rate is zero/absent
         assert "amount_without_vat" not in result
         assert "vat_amount" not in result
 

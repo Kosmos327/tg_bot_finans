@@ -167,15 +167,19 @@ def _calc_totals(row_dict: Dict[str, Any]) -> Dict[str, Any]:
     return row_dict
 
 
+# Fixed VAT rate for billing calculations (20% as per Russian tax law)
+BILLING_VAT_RATE = 0.20
+
+
 def _calc_billing_totals_v2(row_dict: Dict[str, Any]) -> Dict[str, Any]:
     """
     Calculate new-format billing totals with fixed 20% VAT breakdown.
 
     For each service category (shipments, storage, returns_pickup, additional_services):
-      without_vat = with_vat / 1.2
+      without_vat = with_vat / (1 + BILLING_VAT_RATE)
       vat         = with_vat - without_vat
 
-    Totals:
+    Totals (per problem spec):
       total_without_vat = sum(without_vat for all services) - penalties
       total_vat         = sum(vat for all services)
       total_with_vat    = total_without_vat + total_vat
@@ -186,7 +190,7 @@ def _calc_billing_totals_v2(row_dict: Dict[str, Any]) -> Dict[str, Any]:
 
     for svc in services:
         with_vat = safe_float(row_dict.get(f"{svc}_with_vat", 0))
-        without_vat = round(with_vat / 1.2, 2)
+        without_vat = round(with_vat / (1 + BILLING_VAT_RATE), 2)
         vat_amount = round(with_vat - without_vat, 2)
         row_dict[f"{svc}_without_vat"] = without_vat
         row_dict[f"{svc}_vat"] = vat_amount

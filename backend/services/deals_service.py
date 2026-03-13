@@ -329,7 +329,9 @@ def _calculate_deal_financials(payload: dict) -> dict:
     charged = safe_float(str(payload.get("charged_with_vat", 0)))
     vat_rate = safe_float(str(payload.get("vat_rate", 0)))
 
-    # VAT breakdown on charged amount
+    # VAT breakdown on charged amount.
+    # A falsy (0 or absent) vat_rate means no VAT applies → skip breakdown.
+    # Only compute when there is a positive VAT rate and a charged amount.
     if charged and vat_rate:
         amount_without_vat = round(charged / (1 + vat_rate), 2)
         payload["amount_without_vat"] = amount_without_vat

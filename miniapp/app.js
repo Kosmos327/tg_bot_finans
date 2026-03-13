@@ -1187,6 +1187,7 @@ function calcBillingTotals(prefix) {
 
 function calcBillingTotalsV2() {
   const pVal = (id) => parseFloat(document.getElementById(id)?.value || 0) || 0;
+  const BILLING_VAT_RATE = 0.20; // fixed 20% VAT for billing
 
   const services = [
     { id: 'bv2-shipments-with-vat',      calcId: 'bv2-shipments-no-vat-calc' },
@@ -1200,7 +1201,7 @@ function calcBillingTotalsV2() {
 
   for (const svc of services) {
     const withVat = pVal(svc.id);
-    const noVat = withVat / 1.2;
+    const noVat = withVat / (1 + BILLING_VAT_RATE);
     const vatA = withVat - noVat;
     totalNoVat += noVat;
     totalVat += vatA;
@@ -1208,6 +1209,7 @@ function calcBillingTotalsV2() {
   }
 
   const penalties = pVal('bv2-penalties');
+  // Penalties reduce only the pre-VAT total (per spec: total_without_vat = sum(without_vat) - penalties)
   totalNoVat = totalNoVat - penalties;
   const totalWithVat = totalNoVat + totalVat;
 
