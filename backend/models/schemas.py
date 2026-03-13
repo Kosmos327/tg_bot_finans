@@ -71,7 +71,7 @@ class PaymentMarkRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 class BillingPeriod(BaseModel):
-    """One billing period block (p1 or p2)."""
+    """One billing period block (p1 or p2) – old format."""
     shipments_amount: Optional[float] = None
     units: Optional[float] = None
     storage_amount: Optional[float] = None
@@ -86,7 +86,7 @@ class BillingPeriod(BaseModel):
 
 
 class BillingEntryCreate(BaseModel):
-    """Full billing entry for one client in one warehouse."""
+    """Full billing entry for one client in one warehouse – old format (p1/p2 periods)."""
     client_name: str
     p1: Optional[BillingPeriod] = None
     p2: Optional[BillingPeriod] = None
@@ -94,6 +94,26 @@ class BillingEntryCreate(BaseModel):
 
 class BillingEntryResponse(BillingEntryCreate):
     row_index: Optional[int] = None
+
+
+class BillingEntryCreateV2(BaseModel):
+    """
+    Billing entry in new VAT-aware format (one row per client/period).
+
+    VAT-derived fields (shipments_vat, shipments_without_vat, etc.) and totals
+    (total_without_vat, total_vat, total_with_vat) are calculated automatically
+    by the backend using a fixed 20% VAT rate.
+    """
+    client: str
+    period: Optional[str] = None
+
+    shipments_with_vat: Optional[float] = None
+    storage_with_vat: Optional[float] = None
+    returns_pickup_with_vat: Optional[float] = None
+    returns_trips_count: Optional[int] = None
+    additional_services_with_vat: Optional[float] = None
+    penalties: Optional[float] = None
+    payment_status: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -104,24 +124,46 @@ EXPENSE_TYPES = frozenset({"variable", "production", "logistics", "returns", "ex
 
 
 class ExpenseCreate(BaseModel):
+    # New field names (take priority)
+    category: Optional[str] = None
+    amount_with_vat: Optional[float] = None
+    vat_rate: Optional[float] = None
+    created_by: Optional[str] = None
+
+    # Legacy field names (kept for backward compatibility)
     deal_id: Optional[str] = None
-    expense_type: str
-    amount: float
+    expense_type: Optional[str] = None
+    amount: Optional[float] = None
     vat: Optional[float] = None
     amount_without_vat: Optional[float] = None
 
-    @field_validator("expense_type")
+    @field_validator("category", "expense_type", mode="before")
     @classmethod
-    def validate_expense_type(cls, v: str) -> str:
-        if v not in EXPENSE_TYPES:
+    def validate_expense_type(cls, v: Any) -> Any:
+        if v is None:
+            return v
+        v_str = str(v).strip().lower()
+        if v_str not in EXPENSE_TYPES:
             raise ValueError(
-                f"expense_type must be one of: {', '.join(sorted(EXPENSE_TYPES))}"
+                f"category/expense_type must be one of: {', '.join(sorted(EXPENSE_TYPES))}"
             )
-        return v
+        return v_str
 
 
-class ExpenseResponse(ExpenseCreate):
+class ExpenseResponse(BaseModel):
     expense_id: Optional[str] = None
+    date: Optional[str] = None
+    category: Optional[str] = None
+    amount_with_vat: Optional[float] = None
+    vat_rate: Optional[float] = None
+    vat_amount: Optional[float] = None
+    amount_without_vat: Optional[float] = None
+    created_by: Optional[str] = None
+    # backward compat
+    deal_id: Optional[str] = None
+    expense_type: Optional[str] = None
+    amount: Optional[float] = None
+    vat: Optional[float] = None
     created_at: Optional[str] = None
 
 

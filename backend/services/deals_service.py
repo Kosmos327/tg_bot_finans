@@ -67,6 +67,7 @@ DEALS_COLUMN_MAP: Dict[str, str] = {
     "Дата начала проекта": "project_start_date",
     "Дата окончания проекта": "project_end_date",
     "Дата выставления акта": "act_date",
+    # Legacy expense fields
     "Переменный расход 1": "variable_expense_1",
     "Переменный расход 2": "variable_expense_2",
     "Бонус менеджера %": "manager_bonus_percent",
@@ -75,6 +76,28 @@ DEALS_COLUMN_MAP: Dict[str, str] = {
     "Источник": "source",
     "Документ/ссылка": "document_link",
     "Комментарий": "comment",
+    # New VAT breakdown columns
+    "Ставка НДС": "vat_rate",
+    "Сумма НДС": "vat_amount",
+    "Сумма без НДС": "amount_without_vat",
+    # New variable expense 1 VAT breakdown
+    "Переменный расход 1 с НДС": "variable_expense_1_with_vat",
+    "НДС перем. расход 1": "variable_expense_1_vat",
+    "Переменный расход 1 без НДС": "variable_expense_1_without_vat",
+    # New variable expense 2 VAT breakdown
+    "Переменный расход 2 с НДС": "variable_expense_2_with_vat",
+    "НДС перем. расход 2": "variable_expense_2_vat",
+    "Переменный расход 2 без НДС": "variable_expense_2_without_vat",
+    # New production expense VAT breakdown
+    "Производств. расход с НДС": "production_expense_with_vat",
+    "НДС производств. расход": "production_expense_vat",
+    "Производств. расход без НДС": "production_expense_without_vat",
+    # Calculated profitability columns
+    "Бонус менеджера сумма": "manager_bonus_amount",
+    "Маржинальный доход": "marginal_income",
+    "Валовая прибыль": "gross_profit",
+    # Metadata
+    "Дата создания": "created_at",
 }
 
 # Reverse map: internal field name → Russian sheet header
@@ -93,12 +116,45 @@ _NUMERIC_FIELDS = frozenset(
         "manager_bonus_percent",
         "manager_bonus_paid",
         "general_production_expense",
+        # New VAT fields
+        "vat_rate",
+        "vat_amount",
+        "amount_without_vat",
+        "variable_expense_1_with_vat",
+        "variable_expense_1_vat",
+        "variable_expense_1_without_vat",
+        "variable_expense_2_with_vat",
+        "variable_expense_2_vat",
+        "variable_expense_2_without_vat",
+        "production_expense_with_vat",
+        "production_expense_vat",
+        "production_expense_without_vat",
+        "manager_bonus_amount",
+        "marginal_income",
+        "gross_profit",
     }
 )
 
 # Fields that should be stored as YYYY-MM-DD dates
 _DATE_FIELDS = frozenset(
     {"project_start_date", "project_end_date", "act_date"}
+)
+
+# Fields that are auto-calculated (computed from other fields; never forced from outside)
+_CALC_FIELDS = frozenset(
+    {
+        "vat_amount",
+        "amount_without_vat",
+        "variable_expense_1_vat",
+        "variable_expense_1_without_vat",
+        "variable_expense_2_vat",
+        "variable_expense_2_without_vat",
+        "production_expense_vat",
+        "production_expense_without_vat",
+        "marginal_income",
+        "gross_profit",
+        "manager_bonus_amount",
+    }
 )
 
 # Required fields for deal creation
@@ -248,11 +304,93 @@ def _validate_required_fields(deal_data: dict) -> None:
         raise ValueError(f"Missing required fields: {', '.join(sorted(missing))}")
 
 
+def _calculate_deal_financials(payload: dict) -> dict:
+    """
+    Compute VAT-derived and profitability fields from *payload* in-place.
+
+    Calculations performed (only when required inputs are present):
+      amount_without_vat      = charged_with_vat / (1 + vat_rate)
+      vat_amount              = charged_with_vat - amount_without_vat
+
+      variable_expense_N_without_vat = variable_expense_N_with_vat / (1 + vat_rate)
+      variable_expense_N_vat         = variable_expense_N_with_vat - without_vat
+
+      production_expense_without_vat = production_expense_with_vat / (1 + vat_rate)
+      production_expense_vat         = production_expense_with_vat - without_vat
+
+      marginal_income  = amount_without_vat
+                        - variable_expense_1_without_vat
+                        - variable_expense_2_without_vat
+      gross_profit     = marginal_income - production_expense_without_vat
+      manager_bonus_amount = gross_profit * manager_bonus_percent / 100
+
+    Returns the same dict (modified in-place).
+    """
+    charged = safe_float(str(payload.get("charged_with_vat", 0)))
+    vat_rate = safe_float(str(payload.get("vat_rate", 0)))
+
+    # VAT breakdown on charged amount
+    if charged and vat_rate:
+        amount_without_vat = round(charged / (1 + vat_rate), 2)
+        payload["amount_without_vat"] = amount_without_vat
+        payload["vat_amount"] = round(charged - amount_without_vat, 2)
+
+    # Helper: compute without_vat / vat for a with_vat amount
+    def _split_vat(with_vat_val: float) -> tuple:
+        if with_vat_val and vat_rate:
+            without = round(with_vat_val / (1 + vat_rate), 2)
+            vat_a = round(with_vat_val - without, 2)
+            return without, vat_a
+        return None, None
+
+    # Variable expense 1
+    ve1_with = safe_float(str(payload.get("variable_expense_1_with_vat", 0)))
+    ve1_without, ve1_vat = _split_vat(ve1_with)
+    if ve1_without is not None:
+        payload["variable_expense_1_without_vat"] = ve1_without
+        payload["variable_expense_1_vat"] = ve1_vat
+
+    # Variable expense 2
+    ve2_with = safe_float(str(payload.get("variable_expense_2_with_vat", 0)))
+    ve2_without, ve2_vat = _split_vat(ve2_with)
+    if ve2_without is not None:
+        payload["variable_expense_2_without_vat"] = ve2_without
+        payload["variable_expense_2_vat"] = ve2_vat
+
+    # Production expense
+    pe_with = safe_float(str(payload.get("production_expense_with_vat", 0)))
+    pe_without, pe_vat = _split_vat(pe_with)
+    if pe_without is not None:
+        payload["production_expense_without_vat"] = pe_without
+        payload["production_expense_vat"] = pe_vat
+
+    # Marginal income: needs amount_without_vat to be populated
+    amount_no_vat = safe_float(str(payload.get("amount_without_vat", 0)))
+    if amount_no_vat:
+        ve1_no = safe_float(str(payload.get("variable_expense_1_without_vat", 0)))
+        ve2_no = safe_float(str(payload.get("variable_expense_2_without_vat", 0)))
+        marginal_income = round(amount_no_vat - ve1_no - ve2_no, 2)
+        payload["marginal_income"] = marginal_income
+
+        # Gross profit
+        pe_no = safe_float(str(payload.get("production_expense_without_vat", 0)))
+        gross_profit = round(marginal_income - pe_no, 2)
+        payload["gross_profit"] = gross_profit
+
+        # Manager bonus amount
+        bonus_pct = safe_float(str(payload.get("manager_bonus_percent", 0)))
+        if bonus_pct:
+            payload["manager_bonus_amount"] = round(gross_profit * bonus_pct / 100, 2)
+
+    return payload
+
+
 def _prepare_deal_payload(deal_data: dict, deal_id: str) -> dict:
     """
     Build a complete deal payload dict with normalised values.
     All optional numeric fields default to 0.0 if not provided;
     optional string fields default to "".
+    Auto-calculated fields (VAT breakdown, profitability) are computed here.
     """
     payload = {
         "deal_id": deal_id,
@@ -266,6 +404,7 @@ def _prepare_deal_payload(deal_data: dict, deal_id: str) -> dict:
         "project_start_date": normalise_date(str(deal_data.get("project_start_date", ""))),
         "project_end_date": normalise_date(str(deal_data.get("project_end_date", ""))),
         "act_date": normalise_date(str(deal_data.get("act_date", ""))),
+        # Legacy expense fields
         "variable_expense_1": safe_float(str(deal_data.get("variable_expense_1", 0))),
         "variable_expense_2": safe_float(str(deal_data.get("variable_expense_2", 0))),
         "manager_bonus_percent": safe_float(str(deal_data.get("manager_bonus_percent", 0))),
@@ -276,7 +415,23 @@ def _prepare_deal_payload(deal_data: dict, deal_id: str) -> dict:
         "source": str(deal_data.get("source", "")).strip(),
         "document_link": str(deal_data.get("document_link", "")).strip(),
         "comment": str(deal_data.get("comment", "")).strip(),
+        # New VAT and expense fields (from input, then overridden by auto-calc below)
+        "vat_rate": safe_float(str(deal_data.get("vat_rate", 0))),
+        "variable_expense_1_with_vat": safe_float(
+            str(deal_data.get("variable_expense_1_with_vat", 0))
+        ),
+        "variable_expense_2_with_vat": safe_float(
+            str(deal_data.get("variable_expense_2_with_vat", 0))
+        ),
+        "production_expense_with_vat": safe_float(
+            str(deal_data.get("production_expense_with_vat", 0))
+        ),
+        # created_at timestamp
+        "created_at": str(deal_data.get("created_at", "")).strip()
+            or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
+    # Apply auto-calculations for VAT and profitability
+    _calculate_deal_financials(payload)
     return payload
 
 

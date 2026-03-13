@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
-from backend.models.schemas import BillingEntryCreate, BillingEntryResponse, PaymentMarkRequest
+from backend.models.schemas import BillingEntryCreate, BillingEntryResponse, BillingEntryCreateV2, PaymentMarkRequest
 from backend.services import settings_service
 from backend.services.billing_service import (
     get_billing_entries,
@@ -124,15 +124,18 @@ async def get_billing(
 @router.post("/{warehouse}", response_model=Dict[str, Any])
 async def upsert_billing(
     warehouse: str,
-    body: BillingEntryCreate,
+    body: Dict[str, Any],
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     """
     Create or update a billing entry for a client in the given warehouse.
 
+    Accepts both old format (client_name + p1/p2 period objects) and new
+    VAT-aware format (client + shipments_with_vat etc.).
+
     Requires the manager or admin role.
-    Totals (total_without_penalties, total_with_penalties) are calculated automatically.
+    Totals are calculated automatically.
     """
     if warehouse.lower() not in _ALLOWED_WAREHOUSES:
         raise HTTPException(status_code=400, detail=f"Unknown warehouse: {warehouse}")
@@ -144,14 +147,29 @@ async def upsert_billing(
     if not check_role(role, BILLING_EDIT_ROLES):
         raise HTTPException(status_code=403, detail="Access denied: billing edit requires manager or admin role")
 
-    # Flatten the pydantic model into a plain dict the service expects
-    entry_dict: Dict[str, Any] = {"client_name": body.client_name}
-    for period_prefix, period_obj in [("p1", body.p1), ("p2", body.p2)]:
-        if period_obj is None:
-            continue
-        for field, val in period_obj.model_dump().items():
-            if val is not None:
-                entry_dict[f"{period_prefix}_{field}"] = val
+    # Detect format: new format uses 'client' key or shipments_with_vat
+    is_new_fmt = "client" in body or "shipments_with_vat" in body
+
+    if is_new_fmt:
+        # Validate with BillingEntryCreateV2
+        try:
+            parsed = BillingEntryCreateV2(**body)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        entry_dict: Dict[str, Any] = parsed.model_dump(exclude_none=True)
+    else:
+        # Old format: BillingEntryCreate with p1/p2 sub-objects
+        try:
+            parsed_old = BillingEntryCreate(**body)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        entry_dict = {"client_name": parsed_old.client_name}
+        for period_prefix, period_obj in [("p1", parsed_old.p1), ("p2", parsed_old.p2)]:
+            if period_obj is None:
+                continue
+            for field, val in period_obj.model_dump().items():
+                if val is not None:
+                    entry_dict[f"{period_prefix}_{field}"] = val
 
     try:
         result = upsert_billing_entry(

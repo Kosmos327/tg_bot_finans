@@ -1,18 +1,35 @@
 """
 billing_service.py – CRUD operations for billing_msk / billing_nsk / billing_ekb sheets.
 
-Sheet structure (header row):
-  client_name
-  p1_shipments_amount, p1_units, p1_storage_amount, p1_pallets,
-  p1_returns_amount, p1_returns_trips, p1_extra_services, p1_penalties,
-  p1_total_without_penalties, p1_total_with_penalties
-  p2_shipments_amount, p2_units, p2_storage_amount, p2_pallets,
-  p2_returns_amount, p2_returns_trips, p2_extra_services, p2_penalties,
-  p2_total_without_penalties, p2_total_with_penalties
+Supports two sheet formats:
 
-Totals are calculated automatically:
-  total_without_penalties = shipments_amount + storage_amount + returns_amount + extra_services
-  total_with_penalties    = total_without_penalties - penalties
+Old format (p1/p2 period columns):
+  client_name, p1_shipments_amount, p1_units, p1_storage_amount, p1_pallets,
+  p1_returns_amount, p1_returns_trips, p1_extra_services, p1_penalties,
+  p1_total_without_penalties, p1_total_with_penalties,
+  p2_shipments_amount, ... (same pattern)
+
+New format (VAT-aware single-period columns):
+  client, period,
+  shipments_with_vat, shipments_vat, shipments_without_vat,
+  storage_with_vat, storage_vat, storage_without_vat,
+  returns_pickup_with_vat, returns_pickup_vat, returns_pickup_without_vat,
+  returns_trips_count,
+  additional_services_with_vat, additional_services_vat, additional_services_without_vat,
+  penalties,
+  total_without_vat, total_vat, total_with_vat,
+  payment_status
+
+Format detection is automatic based on header row.
+
+Automatic calculations (new format, fixed 20% VAT):
+  *_without_vat = *_with_vat / 1.2
+  *_vat         = *_with_vat - *_without_vat
+  total_without_vat = shipments_without_vat + storage_without_vat
+                    + returns_pickup_without_vat + additional_services_without_vat
+                    - penalties
+  total_vat     = sum of all *_vat fields
+  total_with_vat = total_without_vat + total_vat
 
 Public API
 ----------
@@ -43,10 +60,9 @@ logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
-# Column definitions
+# Column definitions – OLD format (p1/p2 period-based)
 # ---------------------------------------------------------------------------
 
-# All expected sheet headers in order
 BILLING_HEADERS: List[str] = [
     "client_name",
     "p1_shipments_amount", "p1_units", "p1_storage_amount", "p1_pallets",
@@ -57,13 +73,12 @@ BILLING_HEADERS: List[str] = [
     "p2_total_without_penalties", "p2_total_with_penalties",
 ]
 
-# Fields that are auto-calculated (never written from request data directly)
-_CALC_FIELDS = frozenset({
+# Fields that are auto-calculated in old format
+_CALC_FIELDS_OLD = frozenset({
     "p1_total_without_penalties", "p1_total_with_penalties",
     "p2_total_without_penalties", "p2_total_with_penalties",
 })
 
-# Sum components for "total without penalties" per period
 _SUM_FIELDS_P1 = [
     "p1_shipments_amount", "p1_storage_amount",
     "p1_returns_amount", "p1_extra_services",
@@ -72,6 +87,50 @@ _SUM_FIELDS_P2 = [
     "p2_shipments_amount", "p2_storage_amount",
     "p2_returns_amount", "p2_extra_services",
 ]
+
+# ---------------------------------------------------------------------------
+# Column definitions – NEW format (VAT-aware single-period)
+# ---------------------------------------------------------------------------
+
+BILLING_HEADERS_V2: List[str] = [
+    "client",
+    "period",
+    "shipments_with_vat",
+    "shipments_vat",
+    "shipments_without_vat",
+    "storage_with_vat",
+    "storage_vat",
+    "storage_without_vat",
+    "returns_pickup_with_vat",
+    "returns_pickup_vat",
+    "returns_pickup_without_vat",
+    "returns_trips_count",
+    "additional_services_with_vat",
+    "additional_services_vat",
+    "additional_services_without_vat",
+    "penalties",
+    "total_without_vat",
+    "total_vat",
+    "total_with_vat",
+    "payment_status",
+]
+
+# Calculated columns in new format (re-computed from input)
+_CALC_FIELDS_V2 = frozenset({
+    "shipments_vat", "shipments_without_vat",
+    "storage_vat", "storage_without_vat",
+    "returns_pickup_vat", "returns_pickup_without_vat",
+    "additional_services_vat", "additional_services_without_vat",
+    "total_without_vat", "total_vat", "total_with_vat",
+})
+
+# ---------------------------------------------------------------------------
+# Format detection
+# ---------------------------------------------------------------------------
+
+def _is_new_format(header_map: Dict[str, int]) -> bool:
+    """Return True if the sheet uses the new VAT-aware billing format."""
+    return "shipments_with_vat" in header_map or "client" in header_map
 
 
 # ---------------------------------------------------------------------------
@@ -92,9 +151,8 @@ def _resolve_sheet_name(warehouse: str) -> str:
 
 def _calc_totals(row_dict: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Calculate and inject auto-computed total fields into *row_dict* in-place.
-
-    Returns the same dict (modified).
+    Calculate old-format totals (p1/p2) in-place.
+    Returns the same dict.
     """
     for prefix, sum_fields, total_key, with_key, pen_key in [
         ("p1", _SUM_FIELDS_P1, "p1_total_without_penalties",
@@ -109,8 +167,52 @@ def _calc_totals(row_dict: Dict[str, Any]) -> Dict[str, Any]:
     return row_dict
 
 
+def _calc_billing_totals_v2(row_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Calculate new-format billing totals with fixed 20% VAT breakdown.
+
+    For each service category (shipments, storage, returns_pickup, additional_services):
+      without_vat = with_vat / 1.2
+      vat         = with_vat - without_vat
+
+    Totals:
+      total_without_vat = sum(without_vat for all services) - penalties
+      total_vat         = sum(vat for all services)
+      total_with_vat    = total_without_vat + total_vat
+
+    Returns the same dict (modified in-place).
+    """
+    services = ["shipments", "storage", "returns_pickup", "additional_services"]
+
+    for svc in services:
+        with_vat = safe_float(row_dict.get(f"{svc}_with_vat", 0))
+        without_vat = round(with_vat / 1.2, 2)
+        vat_amount = round(with_vat - without_vat, 2)
+        row_dict[f"{svc}_without_vat"] = without_vat
+        row_dict[f"{svc}_vat"] = vat_amount
+
+    penalties = safe_float(row_dict.get("penalties", 0))
+
+    total_without_vat = round(
+        sum(safe_float(row_dict.get(f"{svc}_without_vat", 0)) for svc in services)
+        - penalties,
+        2,
+    )
+    total_vat = round(
+        sum(safe_float(row_dict.get(f"{svc}_vat", 0)) for svc in services),
+        2,
+    )
+    total_with_vat = round(total_without_vat + total_vat, 2)
+
+    row_dict["total_without_vat"] = total_without_vat
+    row_dict["total_vat"] = total_vat
+    row_dict["total_with_vat"] = total_with_vat
+
+    return row_dict
+
+
 def _ensure_headers(ws) -> None:
-    """Write the canonical header row if the sheet is empty."""
+    """Write the canonical header row if the sheet is empty (uses old format for compat)."""
     try:
         existing = ws.row_values(1)
         if not any(c.strip() for c in existing):
@@ -139,12 +241,22 @@ def _dict_to_row(header_map: Dict[str, int], data: Dict[str, Any]) -> List:
     return row
 
 
+def _get_client_col(header_map: Dict[str, int]) -> Optional[int]:
+    """Return the column index for the client identifier (new: 'client', old: 'client_name')."""
+    return header_map.get("client") if "client" in header_map else header_map.get("client_name")
+
+
+def _get_client_key(header_map: Dict[str, int]) -> str:
+    """Return the column name used for client identifier."""
+    return "client" if "client" in header_map else "client_name"
+
+
 def _find_client_row(ws, client_name: str, header_map: Dict[str, int]) -> Optional[int]:
     """
-    Return the 1-based row index for the row whose client_name matches.
+    Return the 1-based row index for the row whose client column matches.
     Returns None if not found.
     """
-    client_col_idx = header_map.get("client_name")
+    client_col_idx = _get_client_col(header_map)
     if client_col_idx is None:
         return None
     col_values = ws.col_values(client_col_idx + 1)  # gspread is 1-based
@@ -172,6 +284,7 @@ def get_billing_entries(warehouse: str) -> List[dict]:
     _ensure_headers(ws)
     header_map = get_header_map(ws)
     all_rows = ws.get_all_values()
+    new_fmt = _is_new_format(header_map)
     entries: List[dict] = []
     for i, row in enumerate(all_rows):
         if i == 0:
@@ -179,7 +292,10 @@ def get_billing_entries(warehouse: str) -> List[dict]:
         if not any(c.strip() for c in row):
             continue  # skip empty rows
         entry = _row_to_dict(header_map, row)
-        entry = _calc_totals(entry)
+        if new_fmt:
+            entry = _calc_billing_totals_v2(entry)
+        else:
+            entry = _calc_totals(entry)
         entries.append(entry)
     return entries
 
@@ -187,8 +303,11 @@ def get_billing_entries(warehouse: str) -> List[dict]:
 def get_billing_entry(warehouse: str, client_name: str) -> Optional[dict]:
     """Return the billing row for a specific client in the given warehouse."""
     entries = get_billing_entries(warehouse)
+    client_key = "client_name"
+    if entries and "client" in entries[0]:
+        client_key = "client"
     for e in entries:
-        if e.get("client_name", "").strip() == client_name.strip():
+        if e.get(client_key, "").strip() == client_name.strip():
             return e
     return None
 
@@ -200,7 +319,10 @@ def upsert_billing_entry(
     role: str = "",
 ) -> dict:
     """
-    Create or update a billing row for *entry_data["client_name"]* in *warehouse*.
+    Create or update a billing row for the client in *entry_data* for *warehouse*.
+
+    Supports both old format (client_name, p1_*/p2_* fields) and new format
+    (client, shipments_with_vat, etc.).
 
     Auto-calculated totals are computed before writing.
     Journal entry is appended after a successful write.
@@ -215,30 +337,49 @@ def upsert_billing_entry(
 
     _ensure_headers(ws)
     header_map = get_header_map(ws)
+    new_fmt = _is_new_format(header_map)
 
-    client_name = str(entry_data.get("client_name", "")).strip()
+    # Determine client name from entry_data (support both 'client' and 'client_name')
+    client_name = str(
+        entry_data.get("client") or entry_data.get("client_name", "")
+    ).strip()
     if not client_name:
-        raise ValueError("client_name is required")
+        raise ValueError("client (or client_name) is required")
 
-    # Strip out calculated fields from incoming data (we recalculate them)
-    cleaned: Dict[str, Any] = {
-        k: v for k, v in entry_data.items()
-        if k not in _CALC_FIELDS
-    }
+    # Normalise client key to match the sheet's column
+    client_key = _get_client_key(header_map)
 
-    # Recalculate totals
-    _calc_totals(cleaned)
+    if new_fmt:
+        # Strip calculated fields; let them be recomputed
+        cleaned: Dict[str, Any] = {
+            k: v for k, v in entry_data.items()
+            if k not in _CALC_FIELDS_V2
+        }
+        # Ensure the client key is correct for this format
+        if "client" not in cleaned and "client_name" in cleaned:
+            cleaned["client"] = cleaned.pop("client_name")
+        elif "client_name" not in cleaned and "client" in cleaned:
+            pass  # already correct
+        _calc_billing_totals_v2(cleaned)
+    else:
+        # Old format: strip old calc fields
+        cleaned = {
+            k: v for k, v in entry_data.items()
+            if k not in _CALC_FIELDS_OLD
+        }
+        # Ensure client_name key
+        if "client_name" not in cleaned and "client" in cleaned:
+            cleaned["client_name"] = cleaned.pop("client")
+        _calc_totals(cleaned)
 
     with _lock:
         row_num = _find_client_row(ws, client_name, header_map)
         row_data = _dict_to_row(header_map, cleaned)
 
         if row_num is None:
-            # Append new row
             ws.append_row(row_data, value_input_option="USER_ENTERED")
             action = "create_billing_entry"
         else:
-            # Update existing row
             last_col_letter = _col_letter(len(row_data) - 1)
             ws.update(
                 f"A{row_num}:{last_col_letter}{row_num}",

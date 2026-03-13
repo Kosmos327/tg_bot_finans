@@ -7,6 +7,7 @@ GET /reports/warehouse/{warehouse}  – warehouse billing report
 GET /reports/clients                – all-clients billing report
 GET /reports/expenses               – expenses report
 GET /reports/profit                 – profit / analytics_monthly report
+GET /reports/warehouse-revenue      – aggregated warehouse revenue with VAT totals
 
 Each route accepts a ?fmt=csv (default) or ?fmt=xlsx query param.
 """
@@ -23,6 +24,7 @@ from backend.services.reports_service import (
     generate_expenses_report,
     generate_profit_report,
     generate_warehouse_report,
+    generate_warehouse_revenue_report,
 )
 from backend.services.permissions import (
     NO_ACCESS_ROLE,
@@ -166,7 +168,7 @@ async def download_profit_report(
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
-    """Download a profit / analytics report from analytics_monthly sheet."""
+    """Download a profit report with VAT totals, revenue without VAT, and gross profit."""
     if fmt.lower() not in _ALLOWED_FMTS:
         raise HTTPException(status_code=400, detail="fmt must be csv or xlsx")
 
@@ -179,6 +181,36 @@ async def download_profit_report(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     filename = f"profit_report.{fmt.lower()}"
+    return Response(
+        content=content,
+        media_type=_media_type(fmt.lower()),
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/warehouse-revenue")
+async def download_warehouse_revenue_report(
+    fmt: str = Query(default="csv"),
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
+) -> Response:
+    """
+    Download an aggregated warehouse revenue report.
+
+    Includes total_with_vat, total_vat, total_without_vat per client/warehouse.
+    """
+    if fmt.lower() not in _ALLOWED_FMTS:
+        raise HTTPException(status_code=400, detail="fmt must be csv or xlsx")
+
+    _, role, _ = _resolve_user(x_telegram_init_data, x_user_role)
+    _check_access(role)
+
+    try:
+        content = generate_warehouse_revenue_report(fmt.lower())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    filename = f"warehouse_revenue_report.{fmt.lower()}"
     return Response(
         content=content,
         media_type=_media_type(fmt.lower()),

@@ -243,6 +243,28 @@ function initDealForm() {
     const el = document.getElementById(fieldId);
     if (el) el.addEventListener('change', updateSummary);
   });
+
+  // Live VAT calculation in deal form
+  const chargedEl = document.getElementById('charged_with_vat');
+  const vatRateEl = document.getElementById('vat_rate');
+  const updateDealVat = () => {
+    const charged = parseFloat(chargedEl?.value || 0) || 0;
+    const vatRate = parseFloat(vatRateEl?.value || 0) || 0;
+    const calcRow = document.getElementById('deal-vat-calc');
+    if (!calcRow) return;
+
+    if (charged && vatRate) {
+      const amountNoVat = charged / (1 + vatRate);
+      const vatAmount = charged - amountNoVat;
+      calcRow.style.display = 'flex';
+      setEl('deal-calc-vat-amount', `${vatAmount.toFixed(2)} ₽`);
+      setEl('deal-calc-amount-no-vat', `${amountNoVat.toFixed(2)} ₽`);
+    } else {
+      calcRow.style.display = 'none';
+    }
+  };
+  if (chargedEl) chargedEl.addEventListener('input', updateDealVat);
+  if (vatRateEl) vatRateEl.addEventListener('input', updateDealVat);
 }
 
 function updateSummary() {
@@ -345,12 +367,18 @@ function collectFormData() {
     manager: getFieldValue('manager'),
     charged_with_vat: floatVal('charged_with_vat'),
     vat_type: getFieldValue('vat_type'),
+    vat_rate: floatVal('vat_rate'),
     paid: floatVal('paid'),
     project_start_date: getFieldValue('project_start_date'),
     project_end_date: getFieldValue('project_end_date'),
     act_date: getFieldValue('act_date') || null,
+    // Legacy expense fields
     variable_expense_1: floatVal('variable_expense_1'),
     variable_expense_2: floatVal('variable_expense_2'),
+    // New expense VAT fields
+    variable_expense_1_with_vat: floatVal('variable_expense_1_with_vat'),
+    variable_expense_2_with_vat: floatVal('variable_expense_2_with_vat'),
+    production_expense_with_vat: floatVal('production_expense_with_vat'),
     manager_bonus_percent: floatVal('manager_bonus_percent'),
     manager_bonus_paid: floatVal('manager_bonus_paid'),
     general_production_expense: floatVal('general_production_expense'),
@@ -607,8 +635,19 @@ function renderDealDetail(deal) {
       title: '💰 Финансы',
       fields: [
         ['Начислено с НДС', deal.charged_with_vat != null ? formatCurrency(deal.charged_with_vat) : null],
+        ['Ставка НДС', deal.vat_rate != null ? `${(deal.vat_rate * 100).toFixed(0)}%` : null],
+        ['Сумма НДС', deal.vat_amount != null ? formatCurrency(deal.vat_amount) : null],
+        ['Без НДС', deal.amount_without_vat != null ? formatCurrency(deal.amount_without_vat) : null],
         ['Тип НДС', deal.vat_type],
         ['Оплачено', deal.paid != null ? formatCurrency(deal.paid) : null],
+      ],
+    },
+    {
+      title: '📊 Маржинальность',
+      fields: [
+        ['Маржинальный доход', deal.marginal_income != null ? formatCurrency(deal.marginal_income) : null],
+        ['Валовая прибыль', deal.gross_profit != null ? formatCurrency(deal.gross_profit) : null],
+        ['Бонус менеджера', deal.manager_bonus_amount != null ? formatCurrency(deal.manager_bonus_amount) : null],
       ],
     },
     {
@@ -623,7 +662,13 @@ function renderDealDetail(deal) {
       title: '📊 Расходы и бонусы',
       fields: [
         ['Переменный расход 1', deal.variable_expense_1 != null ? formatCurrency(deal.variable_expense_1) : null],
+        ['Переменный расход 1 с НДС', deal.variable_expense_1_with_vat != null ? formatCurrency(deal.variable_expense_1_with_vat) : null],
+        ['Переменный расход 1 без НДС', deal.variable_expense_1_without_vat != null ? formatCurrency(deal.variable_expense_1_without_vat) : null],
         ['Переменный расход 2', deal.variable_expense_2 != null ? formatCurrency(deal.variable_expense_2) : null],
+        ['Переменный расход 2 с НДС', deal.variable_expense_2_with_vat != null ? formatCurrency(deal.variable_expense_2_with_vat) : null],
+        ['Переменный расход 2 без НДС', deal.variable_expense_2_without_vat != null ? formatCurrency(deal.variable_expense_2_without_vat) : null],
+        ['Произв. расход с НДС', deal.production_expense_with_vat != null ? formatCurrency(deal.production_expense_with_vat) : null],
+        ['Произв. расход без НДС', deal.production_expense_without_vat != null ? formatCurrency(deal.production_expense_without_vat) : null],
         ['Бонус менеджера %', deal.manager_bonus_percent != null ? `${deal.manager_bonus_percent}%` : null],
         ['Бонус выплачено', deal.manager_bonus_paid != null ? formatCurrency(deal.manager_bonus_paid) : null],
         ['Общепроизв. расход', deal.general_production_expense != null ? formatCurrency(deal.general_production_expense) : null],
@@ -635,6 +680,7 @@ function renderDealDetail(deal) {
         ['Источник', deal.source],
         ['Документ/ссылка', deal.document_link],
         ['Комментарий', deal.comment],
+        ['Дата создания', deal.created_at],
       ],
     },
   ];
@@ -1139,8 +1185,60 @@ function calcBillingTotals(prefix) {
   setEl(`${prefix}-total-with-pen`, `${totalWithPen.toFixed(2)} ₽`);
 }
 
+function calcBillingTotalsV2() {
+  const pVal = (id) => parseFloat(document.getElementById(id)?.value || 0) || 0;
+
+  const services = [
+    { id: 'bv2-shipments-with-vat',      calcId: 'bv2-shipments-no-vat-calc' },
+    { id: 'bv2-storage-with-vat',        calcId: 'bv2-storage-no-vat-calc' },
+    { id: 'bv2-returns-pickup-with-vat', calcId: 'bv2-returns-pickup-no-vat-calc' },
+    { id: 'bv2-additional-with-vat',     calcId: 'bv2-additional-no-vat-calc' },
+  ];
+
+  let totalNoVat = 0;
+  let totalVat = 0;
+
+  for (const svc of services) {
+    const withVat = pVal(svc.id);
+    const noVat = withVat / 1.2;
+    const vatA = withVat - noVat;
+    totalNoVat += noVat;
+    totalVat += vatA;
+    setEl(svc.calcId, `${noVat.toFixed(2)} ₽`);
+  }
+
+  const penalties = pVal('bv2-penalties');
+  totalNoVat = totalNoVat - penalties;
+  const totalWithVat = totalNoVat + totalVat;
+
+  setEl('bv2-total-no-vat', `${totalNoVat.toFixed(2)} ₽`);
+  setEl('bv2-total-vat', `${totalVat.toFixed(2)} ₽`);
+  setEl('bv2-total-with-vat', `${totalWithVat.toFixed(2)} ₽`);
+}
+
+function switchBillingFormat(fmt) {
+  const newSection = document.getElementById('billing-section-new');
+  const oldSection = document.getElementById('billing-section-old');
+  if (!newSection || !oldSection) return;
+
+  if (fmt === 'new') {
+    newSection.style.display = 'block';
+    oldSection.style.display = 'none';
+  } else {
+    newSection.style.display = 'none';
+    oldSection.style.display = 'block';
+  }
+}
+
 function initBillingForm() {
-  // Live total calculation
+  // Format switcher
+  const fmtSelect = document.getElementById('billing-format');
+  if (fmtSelect) {
+    fmtSelect.addEventListener('change', () => switchBillingFormat(fmtSelect.value));
+    switchBillingFormat(fmtSelect.value || 'new');
+  }
+
+  // Live total calculation – old format
   ['p1-shipments','p1-storage','p1-returns','p1-extra','p1-penalties'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', () => calcBillingTotals('p1'));
@@ -1148,6 +1246,15 @@ function initBillingForm() {
   ['p2-shipments','p2-storage','p2-returns','p2-extra','p2-penalties'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', () => calcBillingTotals('p2'));
+  });
+
+  // Live total calculation – new format
+  [
+    'bv2-shipments-with-vat', 'bv2-storage-with-vat',
+    'bv2-returns-pickup-with-vat', 'bv2-additional-with-vat', 'bv2-penalties',
+  ].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', calcBillingTotalsV2);
   });
 
   // Save billing
@@ -1162,6 +1269,7 @@ function initBillingForm() {
 async function saveBilling() {
   const warehouse = document.getElementById('billing-warehouse')?.value;
   const clientName = document.getElementById('billing-client')?.value?.trim();
+  const fmt = document.getElementById('billing-format')?.value || 'new';
 
   if (!warehouse || !clientName) {
     showToast('Укажите склад и клиента', 'error');
@@ -1173,29 +1281,46 @@ async function saveBilling() {
     return v ? parseFloat(v) : null;
   };
 
-  const body = {
-    client_name: clientName,
-    p1: {
-      shipments_amount:  pVal('p1-shipments'),
-      units:             pVal('p1-units'),
-      storage_amount:    pVal('p1-storage'),
-      pallets:           pVal('p1-pallets'),
-      returns_amount:    pVal('p1-returns'),
-      returns_trips:     pVal('p1-returns-trips'),
-      extra_services:    pVal('p1-extra'),
-      penalties:         pVal('p1-penalties'),
-    },
-    p2: {
-      shipments_amount:  pVal('p2-shipments'),
-      units:             pVal('p2-units'),
-      storage_amount:    pVal('p2-storage'),
-      pallets:           pVal('p2-pallets'),
-      returns_amount:    pVal('p2-returns'),
-      returns_trips:     pVal('p2-returns-trips'),
-      extra_services:    pVal('p2-extra'),
-      penalties:         pVal('p2-penalties'),
-    },
-  };
+  let body;
+
+  if (fmt === 'new') {
+    const period = document.getElementById('billing-period')?.value || null;
+    body = {
+      client: clientName,
+      period,
+      shipments_with_vat:          pVal('bv2-shipments-with-vat'),
+      storage_with_vat:            pVal('bv2-storage-with-vat'),
+      returns_pickup_with_vat:     pVal('bv2-returns-pickup-with-vat'),
+      returns_trips_count:         pVal('bv2-returns-trips'),
+      additional_services_with_vat:pVal('bv2-additional-with-vat'),
+      penalties:                   pVal('bv2-penalties'),
+      payment_status:              document.getElementById('bv2-payment-status')?.value || null,
+    };
+  } else {
+    body = {
+      client_name: clientName,
+      p1: {
+        shipments_amount:  pVal('p1-shipments'),
+        units:             pVal('p1-units'),
+        storage_amount:    pVal('p1-storage'),
+        pallets:           pVal('p1-pallets'),
+        returns_amount:    pVal('p1-returns'),
+        returns_trips:     pVal('p1-returns-trips'),
+        extra_services:    pVal('p1-extra'),
+        penalties:         pVal('p1-penalties'),
+      },
+      p2: {
+        shipments_amount:  pVal('p2-shipments'),
+        units:             pVal('p2-units'),
+        storage_amount:    pVal('p2-storage'),
+        pallets:           pVal('p2-pallets'),
+        returns_amount:    pVal('p2-returns'),
+        returns_trips:     pVal('p2-returns-trips'),
+        extra_services:    pVal('p2-extra'),
+        penalties:         pVal('p2-penalties'),
+      },
+    };
+  }
 
   try {
     const role = localStorage.getItem('user_role') || '';
@@ -1236,18 +1361,34 @@ async function markPayment() {
 // EXPENSES FORM
 // ==========================================
 function initExpensesForm() {
-  // Live VAT calc
+  // Live VAT calc (supports both VAT rate and explicit VAT amount)
   const amountEl = document.getElementById('expense-amount');
+  const vatRateEl = document.getElementById('expense-vat-rate');
   const vatEl = document.getElementById('expense-vat');
-  const calcEl = document.getElementById('expense-calc-no-vat');
+  const calcNoVatEl = document.getElementById('expense-calc-no-vat');
+  const calcVatAmountEl = document.getElementById('expense-calc-vat-amount');
 
   const updateCalc = () => {
     const amount = parseFloat(amountEl?.value || 0) || 0;
-    const vat = parseFloat(vatEl?.value || 0) || 0;
-    if (calcEl) calcEl.textContent = `${(amount - vat).toFixed(2)} ₽`;
+    const vatRate = parseFloat(vatRateEl?.value || 0) || 0;
+
+    let vatAmount;
+    let amountNoVat;
+
+    if (vatRate) {
+      amountNoVat = amount / (1 + vatRate);
+      vatAmount = amount - amountNoVat;
+    } else {
+      vatAmount = parseFloat(vatEl?.value || 0) || 0;
+      amountNoVat = amount - vatAmount;
+    }
+
+    if (calcVatAmountEl) calcVatAmountEl.textContent = `${vatAmount.toFixed(2)} ₽`;
+    if (calcNoVatEl) calcNoVatEl.textContent = `${amountNoVat.toFixed(2)} ₽`;
   };
 
   if (amountEl) amountEl.addEventListener('input', updateCalc);
+  if (vatRateEl) vatRateEl.addEventListener('input', updateCalc);
   if (vatEl) vatEl.addEventListener('input', updateCalc);
 
   // Save expense
@@ -1267,31 +1408,41 @@ async function saveExpense() {
   if (!amount || amount <= 0) { showToast('Укажите сумму расхода', 'error'); return; }
 
   const dealId = document.getElementById('expense-deal-id')?.value?.trim() || null;
+  const vatRate = parseFloat(document.getElementById('expense-vat-rate')?.value || 0) || 0;
   const vat = parseFloat(document.getElementById('expense-vat')?.value || 0) || 0;
+
+  const payload = {
+    deal_id: dealId,
+    // New field names
+    category: expenseType,
+    amount_with_vat: amount,
+    vat_rate: vatRate || null,
+    // Legacy field names for backward compat
+    expense_type: expenseType,
+    amount,
+    vat: vat || null,
+    amount_without_vat: vatRate ? null : amount - vat,
+  };
 
   try {
     const role = localStorage.getItem('user_role') || '';
     await apiFetch('/expenses', {
       method: 'POST',
       headers: { 'X-User-Role': role },
-      body: JSON.stringify({
-        deal_id: dealId,
-        expense_type: expenseType,
-        amount,
-        vat,
-        amount_without_vat: amount - vat,
-      }),
+      body: JSON.stringify(payload),
     });
     showToast('Расход добавлен!', 'success');
     // Clear form
-    ['expense-deal-id','expense-amount','expense-vat'].forEach(id => {
+    ['expense-deal-id', 'expense-amount', 'expense-vat-rate', 'expense-vat'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
     });
     const typeEl = document.getElementById('expense-type');
     if (typeEl) typeEl.value = '';
-    const calcEl = document.getElementById('expense-calc-no-vat');
-    if (calcEl) calcEl.textContent = '0.00 ₽';
+    const calcNoVatEl = document.getElementById('expense-calc-no-vat');
+    const calcVatAmountEl = document.getElementById('expense-calc-vat-amount');
+    if (calcNoVatEl) calcNoVatEl.textContent = '0.00 ₽';
+    if (calcVatAmountEl) calcVatAmountEl.textContent = '0.00 ₽';
   } catch (err) {
     showToast(`Ошибка: ${err.message}`, 'error');
   }
@@ -1320,18 +1471,25 @@ async function loadExpenses() {
     }
 
     if (listEl) {
-      listEl.innerHTML = data.map(e => `
+      listEl.innerHTML = data.map(e => {
+        const category = e.category || e.expense_type || '—';
+        const amountWithVat = parseFloat(e.amount_with_vat || e.amount) || 0;
+        const amountNoVat = parseFloat(e.amount_without_vat) || 0;
+        const vatAmount = parseFloat(e.vat_amount || e.vat) || 0;
+        const date = e.date || e.created_at || '';
+        return `
         <div class="expense-row">
           <div class="expense-row-header">
-            <span class="expense-type-badge">${escHtml(e.expense_type)}</span>
-            <span class="expense-amount">${formatCurrency(parseFloat(e.amount) || 0)}</span>
+            <span class="expense-type-badge">${escHtml(category)}</span>
+            <span class="expense-amount">${formatCurrency(amountWithVat)}</span>
           </div>
+          ${amountNoVat ? `<div class="expense-row-vat"><span>Без НДС: ${formatCurrency(amountNoVat)}</span><span>НДС: ${formatCurrency(vatAmount)}</span></div>` : ''}
           <div class="expense-row-meta">
             ${e.deal_id ? `<span>Сделка: ${escHtml(e.deal_id)}</span>` : ''}
-            ${e.created_at ? `<span>${escHtml(e.created_at)}</span>` : ''}
+            ${date ? `<span>${escHtml(date)}</span>` : ''}
           </div>
         </div>
-      `).join('');
+      `}).join('');
     }
   } catch (err) {
     if (loadingEl) loadingEl.style.display = 'none';

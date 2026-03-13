@@ -78,6 +78,11 @@
               <div class="field-group">
                 <div class="field"><label for="charged_with_vat">Начислено с НДС, ₽ <span class="required">*</span></label><div class="input-wrapper"><input type="number" id="charged_with_vat" name="charged_with_vat" placeholder="0.00" min="0" step="0.01" required /><span class="input-suffix">₽</span></div><span class="field-error" id="charged_with_vat-error"></span></div>
                 <div class="field"><label for="vat_type">Наличие НДС <span class="required">*</span></label><div class="select-wrapper"><select id="vat_type" name="vat_type" required><option value="">Выберите...</option></select></div><span class="field-error" id="vat_type-error"></span></div>
+                <div class="field"><label for="vat_rate">Ставка НДС (доля, напр. 0.20 для 20%)</label><div class="input-wrapper"><input type="number" id="vat_rate" name="vat_rate" placeholder="0.20" min="0" max="1" step="0.01" /><span class="input-suffix">доля</span></div></div>
+                <div class="vat-calc-row" id="deal-vat-calc" style="display:none;">
+                  <div class="vat-calc-item"><span>Сумма НДС:</span><strong id="deal-calc-vat-amount">0.00 ₽</strong></div>
+                  <div class="vat-calc-item"><span>Сумма без НДС:</span><strong id="deal-calc-amount-no-vat">0.00 ₽</strong></div>
+                </div>
                 <div class="field"><label for="paid">Оплачено, ₽</label><div class="input-wrapper"><input type="number" id="paid" name="paid" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
               </div>
             </section>
@@ -96,6 +101,11 @@
                   <div class="field"><label for="variable_expense_1">Перем. расход 1, ₽</label><div class="input-wrapper"><input type="number" id="variable_expense_1" name="variable_expense_1" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
                   <div class="field"><label for="variable_expense_2">Перем. расход 2, ₽</label><div class="input-wrapper"><input type="number" id="variable_expense_2" name="variable_expense_2" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
                 </div>
+                <div class="field-row">
+                  <div class="field"><label for="variable_expense_1_with_vat">Перем. расход 1 с НДС, ₽</label><div class="input-wrapper"><input type="number" id="variable_expense_1_with_vat" name="variable_expense_1_with_vat" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
+                  <div class="field"><label for="variable_expense_2_with_vat">Перем. расход 2 с НДС, ₽</label><div class="input-wrapper"><input type="number" id="variable_expense_2_with_vat" name="variable_expense_2_with_vat" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
+                </div>
+                <div class="field"><label for="production_expense_with_vat">Произв. расход с НДС, ₽</label><div class="input-wrapper"><input type="number" id="production_expense_with_vat" name="production_expense_with_vat" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
                 <div class="field-row">
                   <div class="field"><label for="manager_bonus_percent">Бонус мен., %</label><div class="input-wrapper"><input type="number" id="manager_bonus_percent" name="manager_bonus_percent" placeholder="0" min="0" max="100" step="0.1" /><span class="input-suffix">%</span></div></div>
                   <div class="field"><label for="manager_bonus_paid">Бонус выпл., ₽</label><div class="input-wrapper"><input type="number" id="manager_bonus_paid" name="manager_bonus_paid" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
@@ -158,8 +168,64 @@
           <div class="field-group">
             <div class="field"><label for="billing-warehouse">Склад</label><div class="select-wrapper"><select id="billing-warehouse"><option value="msk">MSK — Москва</option><option value="nsk">NSK — Новосибирск</option><option value="ekb">EKB — Екатеринбург</option></select></div></div>
             <div class="field"><label for="billing-client">Клиент</label><input type="text" id="billing-client" placeholder="Название клиента..." /></div>
+            <div class="field"><label for="billing-period">Период (напр. 2024-01)</label><input type="month" id="billing-period" /></div>
+            <div class="field"><label>Формат ввода</label><div class="select-wrapper"><select id="billing-format"><option value="new">Новый (с НДС)</option><option value="old">Старый (периоды p1/p2)</option></select></div></div>
           </div>
         </section>
+
+        <!-- NEW FORMAT SECTION -->
+        <div id="billing-section-new">
+        <section class="card">
+          <div class="card-header"><span class="section-icon">🚚</span><h2>Отгрузки</h2></div>
+          <div class="field-group">
+            <div class="field-row">
+              <div class="field"><label for="bv2-shipments-with-vat">Отгрузки с НДС, ₽</label><input type="number" id="bv2-shipments-with-vat" placeholder="0" min="0" step="0.01" /></div>
+              <div class="field"><label>Без НДС:</label><strong id="bv2-shipments-no-vat-calc">0.00 ₽</strong></div>
+            </div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="card-header"><span class="section-icon">📦</span><h2>Хранение</h2></div>
+          <div class="field-group">
+            <div class="field-row">
+              <div class="field"><label for="bv2-storage-with-vat">Хранение с НДС, ₽</label><input type="number" id="bv2-storage-with-vat" placeholder="0" min="0" step="0.01" /></div>
+              <div class="field"><label>Без НДС:</label><strong id="bv2-storage-no-vat-calc">0.00 ₽</strong></div>
+            </div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="card-header"><span class="section-icon">↩️</span><h2>Возвраты</h2></div>
+          <div class="field-group">
+            <div class="field-row">
+              <div class="field"><label for="bv2-returns-pickup-with-vat">Забор возвратов с НДС, ₽</label><input type="number" id="bv2-returns-pickup-with-vat" placeholder="0" min="0" step="0.01" /></div>
+              <div class="field"><label>Без НДС:</label><strong id="bv2-returns-pickup-no-vat-calc">0.00 ₽</strong></div>
+            </div>
+            <div class="field"><label for="bv2-returns-trips">Кол-во рейсов</label><input type="number" id="bv2-returns-trips" placeholder="0" min="0" /></div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="card-header"><span class="section-icon">➕</span><h2>Доп. услуги и штрафы</h2></div>
+          <div class="field-group">
+            <div class="field-row">
+              <div class="field"><label for="bv2-additional-with-vat">Доп. услуги с НДС, ₽</label><input type="number" id="bv2-additional-with-vat" placeholder="0" min="0" step="0.01" /></div>
+              <div class="field"><label>Без НДС:</label><strong id="bv2-additional-no-vat-calc">0.00 ₽</strong></div>
+            </div>
+            <div class="field"><label for="bv2-penalties">Штрафы, ₽</label><input type="number" id="bv2-penalties" placeholder="0" min="0" step="0.01" /></div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="card-header"><span class="section-icon">📊</span><h2>Итого (новый формат)</h2></div>
+          <div class="billing-totals">
+            <div class="total-row"><span>Итого без НДС:</span><strong id="bv2-total-no-vat">0.00 ₽</strong></div>
+            <div class="total-row"><span>Итого НДС:</span><strong id="bv2-total-vat">0.00 ₽</strong></div>
+            <div class="total-row"><span>Итого с НДС:</span><strong id="bv2-total-with-vat">0.00 ₽</strong></div>
+          </div>
+          <div class="field" style="margin-top:12px;"><label for="bv2-payment-status">Статус оплаты</label><div class="select-wrapper"><select id="bv2-payment-status"><option value="">Не указан</option><option value="paid">Оплачено</option><option value="partial">Частично</option><option value="pending">Ожидает</option></select></div></div>
+        </section>
+        </div>
+
+        <!-- OLD FORMAT SECTIONS (p1/p2) -->
+        <div id="billing-section-old" style="display:none;">
         <section class="card">
           <div class="card-header"><span class="section-icon">📅</span><h2>Период 1</h2></div>
           <div class="field-group">
@@ -180,6 +246,7 @@
             <div class="billing-totals"><div class="total-row"><span>Итого без штрафов:</span><strong id="p2-total-no-pen">0.00 ₽</strong></div><div class="total-row"><span>Итого со штрафами:</span><strong id="p2-total-with-pen">0.00 ₽</strong></div></div>
           </div>
         </section>
+        </div>
         <div class="form-actions"><button class="btn btn-primary" id="billing-save-btn">💾 Сохранить billing</button></div>
         <section class="card">
           <div class="card-header"><span class="section-icon">💳</span><h2>Отметить оплату</h2></div>
@@ -198,9 +265,13 @@
           <div class="field-group">
             <div class="field"><label for="expense-deal-id">ID сделки (необязательно)</label><input type="text" id="expense-deal-id" placeholder="Введите ID сделки..." /></div>
             <div class="field"><label for="expense-type">Тип расхода <span class="required">*</span></label><div class="select-wrapper"><select id="expense-type"><option value="">Выберите тип...</option><option value="variable">Переменный</option><option value="production">Производственный</option><option value="logistics">Логистика</option><option value="returns">Возвраты</option><option value="extra">Дополнительный</option></select></div></div>
-            <div class="field"><label for="expense-amount">Сумма, ₽ <span class="required">*</span></label><div class="input-wrapper"><input type="number" id="expense-amount" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
-            <div class="field"><label for="expense-vat">НДС, ₽</label><div class="input-wrapper"><input type="number" id="expense-vat" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
-            <div class="expense-calc"><span>Сумма без НДС:</span><strong id="expense-calc-no-vat">0.00 ₽</strong></div>
+            <div class="field"><label for="expense-amount">Сумма с НДС, ₽ <span class="required">*</span></label><div class="input-wrapper"><input type="number" id="expense-amount" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
+            <div class="field"><label for="expense-vat-rate">Ставка НДС (напр. 0.20 для 20%)</label><div class="input-wrapper"><input type="number" id="expense-vat-rate" placeholder="0.20" min="0" max="1" step="0.01" /><span class="input-suffix">доля</span></div></div>
+            <div class="field"><label for="expense-vat">НДС сумма, ₽ (или введите ставку выше)</label><div class="input-wrapper"><input type="number" id="expense-vat" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
+            <div class="expense-calc">
+              <div class="vat-calc-item"><span>Сумма НДС:</span><strong id="expense-calc-vat-amount">0.00 ₽</strong></div>
+              <div class="vat-calc-item"><span>Сумма без НДС:</span><strong id="expense-calc-no-vat">0.00 ₽</strong></div>
+            </div>
           </div>
           <div class="form-actions"><button class="btn btn-primary" id="expense-save-btn">💾 Добавить расход</button></div>
         </section>
@@ -219,8 +290,9 @@
           <div class="reports-grid">
             <div class="report-item"><div class="report-icon">🏭</div><div class="report-info"><div class="report-title">Отчёт по складу</div><div class="report-desc">Billing данные</div></div><div class="report-actions"><div class="select-wrapper select-wrapper--sm"><select id="report-warehouse"><option value="msk">MSK</option><option value="nsk">NSK</option><option value="ekb">EKB</option></select></div><button class="btn btn-sm btn-outline" data-report="warehouse" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="warehouse" data-fmt="xlsx">XLSX</button></div></div>
             <div class="report-item"><div class="report-icon">👥</div><div class="report-info"><div class="report-title">Отчёт по клиентам</div><div class="report-desc">Все клиенты</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="clients" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="clients" data-fmt="xlsx">XLSX</button></div></div>
-            <div class="report-item"><div class="report-icon">📉</div><div class="report-info"><div class="report-title">Отчёт по расходам</div><div class="report-desc">Все расходы</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="expenses" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="expenses" data-fmt="xlsx">XLSX</button></div></div>
-            <div class="report-item"><div class="report-icon">📈</div><div class="report-info"><div class="report-title">Отчёт по прибыли</div><div class="report-desc">Валовая прибыль и маржа</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="profit" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="profit" data-fmt="xlsx">XLSX</button></div></div>
+            <div class="report-item"><div class="report-icon">📉</div><div class="report-info"><div class="report-title">Отчёт по расходам</div><div class="report-desc">Все расходы с НДС</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="expenses" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="expenses" data-fmt="xlsx">XLSX</button></div></div>
+            <div class="report-item"><div class="report-icon">📈</div><div class="report-info"><div class="report-title">Отчёт по прибыли</div><div class="report-desc">Валовая прибыль, НДС, маржа</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="profit" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="profit" data-fmt="xlsx">XLSX</button></div></div>
+            <div class="report-item"><div class="report-icon">🏪</div><div class="report-info"><div class="report-title">Выручка складов</div><div class="report-desc">Итого с НДС / без НДС / НДС</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="warehouse-revenue" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="warehouse-revenue" data-fmt="xlsx">XLSX</button></div></div>
           </div>
         </section>
       </div>
