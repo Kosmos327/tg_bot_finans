@@ -2,10 +2,12 @@
 Centralized role-based permission configuration.
 
 Role hierarchy:
-  manager            – access only to own deals; edits business-side fields
-  accountant         – access to all deals; edits accounting/payment fields
-  operations_director– access to all deals + analytics; edits all fields
-  head_of_sales      – access to all deals + sales analytics; edits all fields
+  manager            – access only to own deals; edits billing/payments/expenses
+  accountant         – access to all deals; edits accounting/payment fields (legacy)
+  accounting         – view profit, add expenses, download reports
+  operations_director– access to all deals + analytics; edits all fields; download reports
+  head_of_sales      – access to all deals + sales analytics; edits all fields (legacy)
+  admin              – full access; view journal, all reports, all expenses
 
 Special values:
   no_access  – user not found or inactive; read-only / denied
@@ -18,10 +20,72 @@ from typing import Dict, FrozenSet, Set
 # ---------------------------------------------------------------------------
 
 ALLOWED_ROLES: FrozenSet[str] = frozenset(
-    {"manager", "accountant", "operations_director", "head_of_sales"}
+    {
+        "manager",
+        "accountant",
+        "accounting",
+        "operations_director",
+        "head_of_sales",
+        "admin",
+    }
 )
 
 NO_ACCESS_ROLE = "no_access"
+
+# ---------------------------------------------------------------------------
+# Role labels (Russian UI labels)
+# ---------------------------------------------------------------------------
+
+ROLE_LABELS_RU: Dict[str, str] = {
+    "manager": "Менеджер",
+    "accountant": "Бухгалтер",
+    "accounting": "Бухгалтерия",
+    "operations_director": "Операционный директор",
+    "head_of_sales": "Руководитель отдела продаж",
+    "admin": "Администратор",
+    NO_ACCESS_ROLE: "Нет доступа",
+}
+
+# ---------------------------------------------------------------------------
+# Password-based role auth (Mini App login)
+# ---------------------------------------------------------------------------
+
+ROLE_PASSWORDS: Dict[str, str] = {
+    "manager": "1",
+    "operations_director": "2",
+    "accounting": "3",
+    "admin": "12345",
+}
+
+# ---------------------------------------------------------------------------
+# Feature-level access flags per role
+# ---------------------------------------------------------------------------
+
+# Roles that can edit billing sheets, enter invoice amounts, penalties, mark payments
+BILLING_EDIT_ROLES: FrozenSet[str] = frozenset({"manager", "admin"})
+
+# Roles that can add expenses
+EXPENSE_ADD_ROLES: FrozenSet[str] = frozenset(
+    {"manager", "accounting", "operations_director", "admin"}
+)
+
+# Roles that can view all finances
+FINANCE_VIEW_ROLES: FrozenSet[str] = frozenset(
+    {"operations_director", "accounting", "admin"}
+)
+
+# Roles that can download reports
+REPORT_DOWNLOAD_ROLES: FrozenSet[str] = frozenset(
+    {"operations_director", "accounting", "admin"}
+)
+
+# Roles that can view the audit journal
+JOURNAL_VIEW_ROLES: FrozenSet[str] = frozenset(
+    {"operations_director", "accounting", "admin"}
+)
+
+# Admin-only features
+ADMIN_ROLES: FrozenSet[str] = frozenset({"admin"})
 
 # ---------------------------------------------------------------------------
 # Fields editable per role
@@ -64,6 +128,8 @@ ROLE_EDITABLE_FIELDS: Dict[str, FrozenSet[str]] = {
     "accountant": _ACCOUNTING_FIELDS,
     "operations_director": _ALL_FIELDS,
     "head_of_sales": _ALL_FIELDS,
+    "accounting": _ACCOUNTING_FIELDS,
+    "admin": _ALL_FIELDS,
     NO_ACCESS_ROLE: frozenset(),
 }
 
@@ -76,8 +142,10 @@ ROLE_VISIBLE_DATA: Dict[str, str] = {
     # "all"  – all deals in the sheet
     "manager": "own",
     "accountant": "all",
+    "accounting": "all",
     "operations_director": "all",
     "head_of_sales": "all",
+    "admin": "all",
     NO_ACCESS_ROLE: "none",
 }
 
@@ -103,3 +171,16 @@ def filter_update_payload(role: str, payload: dict) -> dict:
 def can_see_all_deals(role: str) -> bool:
     """Return True if the role can read all deals (not just own)."""
     return ROLE_VISIBLE_DATA.get(role, "none") == "all"
+
+
+def check_role(role: str, allowed_roles: FrozenSet[str]) -> bool:
+    """Return True if *role* is in *allowed_roles*."""
+    return role in allowed_roles
+
+
+def verify_role_password(role: str, password: str) -> bool:
+    """Return True if the given *password* matches the role's configured password."""
+    expected = ROLE_PASSWORDS.get(role)
+    if expected is None:
+        return False
+    return password == expected
