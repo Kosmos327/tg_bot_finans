@@ -242,6 +242,265 @@ class TestReportsService:
 
 
 # ---------------------------------------------------------------------------
+# deals_service: new VAT / profitability calculations
+# ---------------------------------------------------------------------------
+
+class TestDealFinancials:
+    """Test the _calculate_deal_financials helper directly."""
+
+    def test_vat_breakdown_calculated(self):
+        from backend.services.deals_service import _calculate_deal_financials
+        payload = {"charged_with_vat": 120.0, "vat_rate": 0.20}
+        result = _calculate_deal_financials(payload)
+        assert result["amount_without_vat"] == 100.0
+        assert result["vat_amount"] == 20.0
+
+    def test_vat_breakdown_zero_rate_not_calculated(self):
+        from backend.services.deals_service import _calculate_deal_financials
+        payload = {"charged_with_vat": 1200.0, "vat_rate": 0.0}
+        result = _calculate_deal_financials(payload)
+        # vat_rate=0.0 is falsy → skip auto-calc (no VAT means nothing to break down)
+        # amount_without_vat and vat_amount are not populated when vat_rate is zero/absent
+        assert "amount_without_vat" not in result
+        assert "vat_amount" not in result
+
+    def test_marginal_income_calculated(self):
+        from backend.services.deals_service import _calculate_deal_financials
+        payload = {
+            "charged_with_vat": 1200.0,
+            "vat_rate": 0.20,
+            "variable_expense_1_with_vat": 240.0,
+            "variable_expense_2_with_vat": 120.0,
+        }
+        result = _calculate_deal_financials(payload)
+        # amount_without_vat = 1200/1.2 = 1000
+        assert result["amount_without_vat"] == 1000.0
+        # ve1_without_vat = 240/1.2 = 200
+        assert result["variable_expense_1_without_vat"] == 200.0
+        # ve2_without_vat = 120/1.2 = 100
+        assert result["variable_expense_2_without_vat"] == 100.0
+        # marginal_income = 1000 - 200 - 100 = 700
+        assert result["marginal_income"] == 700.0
+
+    def test_gross_profit_calculated(self):
+        from backend.services.deals_service import _calculate_deal_financials
+        payload = {
+            "charged_with_vat": 1200.0,
+            "vat_rate": 0.20,
+            "variable_expense_1_with_vat": 240.0,
+            "variable_expense_2_with_vat": 0.0,
+            "production_expense_with_vat": 120.0,
+        }
+        result = _calculate_deal_financials(payload)
+        # marginal_income = 1000 - 200 - 0 = 800
+        assert result["marginal_income"] == 800.0
+        # production_without_vat = 120/1.2 = 100
+        assert result["production_expense_without_vat"] == 100.0
+        # gross_profit = 800 - 100 = 700
+        assert result["gross_profit"] == 700.0
+
+    def test_manager_bonus_amount_calculated(self):
+        from backend.services.deals_service import _calculate_deal_financials
+        payload = {
+            "charged_with_vat": 1200.0,
+            "vat_rate": 0.20,
+            "variable_expense_1_with_vat": 0.0,
+            "variable_expense_2_with_vat": 0.0,
+            "production_expense_with_vat": 0.0,
+            "manager_bonus_percent": 10.0,
+        }
+        result = _calculate_deal_financials(payload)
+        # gross_profit = 1000 (all expenses zero)
+        assert result["gross_profit"] == 1000.0
+        # bonus = 1000 * 10 / 100 = 100
+        assert result["manager_bonus_amount"] == 100.0
+
+    def test_vat_breakdown_for_variable_expenses(self):
+        from backend.services.deals_service import _calculate_deal_financials
+        payload = {
+            "charged_with_vat": 600.0,
+            "vat_rate": 0.20,
+            "variable_expense_1_with_vat": 60.0,
+        }
+        result = _calculate_deal_financials(payload)
+        assert result["variable_expense_1_vat"] == 10.0
+        assert result["variable_expense_1_without_vat"] == 50.0
+
+
+# ---------------------------------------------------------------------------
+# billing_service: new VAT-aware format calculations
+# ---------------------------------------------------------------------------
+
+class TestBillingTotalsV2:
+    """Test the new _calc_billing_totals_v2 helper."""
+
+    def test_basic_vat_breakdown(self):
+        from backend.services.billing_service import _calc_billing_totals_v2
+        row = {"shipments_with_vat": 120.0}
+        result = _calc_billing_totals_v2(row)
+        assert result["shipments_without_vat"] == 100.0
+        assert result["shipments_vat"] == 20.0
+
+    def test_total_without_vat_minus_penalties(self):
+        from backend.services.billing_service import _calc_billing_totals_v2
+        row = {
+            "shipments_with_vat": 120.0,
+            "storage_with_vat": 60.0,
+            "returns_pickup_with_vat": 0.0,
+            "additional_services_with_vat": 0.0,
+            "penalties": 5.0,
+        }
+        result = _calc_billing_totals_v2(row)
+        # shipments_without_vat = 100, storage_without_vat = 50
+        # total_without_vat = 100 + 50 + 0 + 0 - 5 = 145
+        assert result["total_without_vat"] == 145.0
+
+    def test_total_vat_sum(self):
+        from backend.services.billing_service import _calc_billing_totals_v2
+        row = {
+            "shipments_with_vat": 120.0,
+            "storage_with_vat": 60.0,
+            "returns_pickup_with_vat": 0.0,
+            "additional_services_with_vat": 0.0,
+            "penalties": 0.0,
+        }
+        result = _calc_billing_totals_v2(row)
+        # shipments_vat = 20, storage_vat = 10
+        assert result["total_vat"] == 30.0
+
+    def test_total_with_vat_equals_sum(self):
+        from backend.services.billing_service import _calc_billing_totals_v2
+        row = {
+            "shipments_with_vat": 120.0,
+            "storage_with_vat": 0.0,
+            "returns_pickup_with_vat": 0.0,
+            "additional_services_with_vat": 0.0,
+            "penalties": 0.0,
+        }
+        result = _calc_billing_totals_v2(row)
+        # total_with_vat = total_without_vat + total_vat = 100 + 20 = 120
+        assert result["total_with_vat"] == 120.0
+
+    def test_format_detection_new_format(self):
+        from backend.services.billing_service import _is_new_format
+        assert _is_new_format({"shipments_with_vat": 0, "client": 0}) is True
+
+    def test_format_detection_old_format(self):
+        from backend.services.billing_service import _is_new_format
+        assert _is_new_format({"client_name": 0, "p1_shipments_amount": 0}) is False
+
+
+# ---------------------------------------------------------------------------
+# expenses_service: new VAT calculations
+# ---------------------------------------------------------------------------
+
+class TestExpensesVATCalc:
+    """Test _calculate_expense_vat helper."""
+
+    def test_vat_calc_20_percent(self):
+        from backend.services.expenses_service import _calculate_expense_vat
+        amount_no_vat, vat_amount = _calculate_expense_vat(120.0, 0.20)
+        assert amount_no_vat == 100.0
+        assert vat_amount == 20.0
+
+    def test_vat_calc_zero_rate(self):
+        from backend.services.expenses_service import _calculate_expense_vat
+        amount_no_vat, vat_amount = _calculate_expense_vat(100.0, 0.0)
+        # zero rate → returns original amount, 0 vat
+        assert amount_no_vat == 100.0
+        assert vat_amount == 0.0
+
+    @patch("backend.services.expenses_service.get_worksheet")
+    @patch("backend.services.expenses_service.append_journal_entry")
+    def test_add_expense_new_style_keys(self, mock_journal, mock_get_ws):
+        ws = MagicMock()
+        ws.row_values.return_value = []
+        ws.col_values.return_value = ["expense_id"]
+        ws.row_values.return_value = []
+        mock_get_ws.return_value = ws
+
+        from backend.services.expenses_service import add_expense
+        result = add_expense(
+            data={
+                "category": "production",
+                "amount_with_vat": 240.0,
+                "vat_rate": 0.20,
+                "deal_id": "DEAL-000001",
+            },
+            user="test_user",
+            role="accounting",
+        )
+
+        assert result["category"] == "production"
+        assert result["amount_with_vat"] == 240.0
+        assert result["vat_rate"] == 0.20
+        assert result["amount_without_vat"] == 200.0
+        assert result["vat_amount"] == 40.0
+        # backward compat fields
+        assert result["expense_type"] == "production"
+        assert result["amount"] == 240.0
+
+    @patch("backend.services.expenses_service.get_worksheet")
+    @patch("backend.services.expenses_service.append_journal_entry")
+    def test_add_expense_legacy_keys_still_work(self, mock_journal, mock_get_ws):
+        ws = MagicMock()
+        ws.row_values.return_value = []
+        ws.col_values.return_value = ["expense_id"]
+        mock_get_ws.return_value = ws
+
+        from backend.services.expenses_service import add_expense
+        result = add_expense(
+            data={"expense_type": "variable", "amount": 1500.0, "vat": 250.0},
+        )
+
+        assert result["expense_type"] == "variable"
+        assert result["category"] == "variable"
+        assert result["amount"] == 1500.0
+
+    @patch("backend.services.expenses_service.get_worksheet")
+    @patch("backend.services.expenses_service.append_journal_entry")
+    def test_add_expense_invalid_category_raises(self, mock_journal, mock_get_ws):
+        from backend.services.expenses_service import add_expense
+        with pytest.raises(ValueError, match="category"):
+            add_expense(data={"category": "invalid_category", "amount_with_vat": 100.0})
+
+
+# ---------------------------------------------------------------------------
+# permissions: new fields in editable sets
+# ---------------------------------------------------------------------------
+
+class TestPermissionsNewFields:
+    def test_vat_rate_in_business_fields(self):
+        from backend.services.permissions import _BUSINESS_FIELDS
+        assert "vat_rate" in _BUSINESS_FIELDS
+
+    def test_new_accounting_fields_present(self):
+        from backend.services.permissions import _ACCOUNTING_FIELDS
+        assert "vat_amount" in _ACCOUNTING_FIELDS
+        assert "amount_without_vat" in _ACCOUNTING_FIELDS
+        assert "variable_expense_1_with_vat" in _ACCOUNTING_FIELDS
+        assert "production_expense_with_vat" in _ACCOUNTING_FIELDS
+        assert "gross_profit" in _ACCOUNTING_FIELDS
+        assert "marginal_income" in _ACCOUNTING_FIELDS
+
+    def test_admin_can_edit_new_fields(self):
+        from backend.services.permissions import get_editable_fields
+        admin_fields = get_editable_fields("admin")
+        assert "vat_rate" in admin_fields
+        assert "gross_profit" in admin_fields
+        assert "marginal_income" in admin_fields
+
+    def test_manager_cannot_edit_accounting_new_fields(self):
+        from backend.services.permissions import get_editable_fields
+        manager_fields = get_editable_fields("manager")
+        # manager can set vat_rate (business field)
+        assert "vat_rate" in manager_fields
+        # manager cannot set accounting-level fields
+        assert "gross_profit" not in manager_fields
+        assert "variable_expense_1_with_vat" not in manager_fields
+
+
+# ---------------------------------------------------------------------------
 # auth router: POST /auth/role-login
 # ---------------------------------------------------------------------------
 

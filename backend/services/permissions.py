@@ -100,6 +100,7 @@ _BUSINESS_FIELDS: FrozenSet[str] = frozenset(
         "manager",
         "charged_with_vat",
         "vat_type",
+        "vat_rate",
         "project_start_date",
         "project_end_date",
         "source",
@@ -113,11 +114,28 @@ _ACCOUNTING_FIELDS: FrozenSet[str] = frozenset(
     {
         "paid",
         "act_date",
+        # Legacy expense fields
         "variable_expense_1",
         "variable_expense_2",
         "manager_bonus_percent",
         "manager_bonus_paid",
         "general_production_expense",
+        # New VAT breakdown fields
+        "vat_amount",
+        "amount_without_vat",
+        "variable_expense_1_with_vat",
+        "variable_expense_1_vat",
+        "variable_expense_1_without_vat",
+        "variable_expense_2_with_vat",
+        "variable_expense_2_vat",
+        "variable_expense_2_without_vat",
+        "production_expense_with_vat",
+        "production_expense_vat",
+        "production_expense_without_vat",
+        # Calculated profitability (editable by accounting/director for overrides)
+        "manager_bonus_amount",
+        "marginal_income",
+        "gross_profit",
     }
 )
 

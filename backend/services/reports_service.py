@@ -18,6 +18,20 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Internal float helper
+# ---------------------------------------------------------------------------
+
+def _to_float(value: Any) -> float:
+    """Convert a value to float, returning 0.0 on failure."""
+    if value is None:
+        return 0.0
+    try:
+        return float(str(value).strip().replace(" ", "").replace(",", "."))
+    except (ValueError, TypeError):
+        return 0.0
+
+
+# ---------------------------------------------------------------------------
 # Low-level serialisation helpers
 # ---------------------------------------------------------------------------
 
@@ -103,18 +117,58 @@ def generate_expenses_report(fmt: str = "csv") -> bytes:
 
 def generate_profit_report(fmt: str = "csv") -> bytes:
     """
-    Return a simple profit summary (revenue, expenses, gross_profit, margin_percent)
-    aggregated from the 'analytics_monthly' sheet.  Falls back to an empty report
-    when the sheet is unavailable.
+    Return a profit summary report.
+
+    Combines data from the 'deals' sheet (revenue, VAT, margins, gross profit)
+    and falls back to the 'analytics_monthly' sheet when available.
+    Includes: vat_totals, revenue_without_vat, gross_profit, warehouse_revenue.
     """
     from backend.services.sheets_service import (
         SHEET_ANALYTICS_MONTHLY,
+        SHEET_DEALS,
         SheetNotFoundError,
         SheetsError,
         get_worksheet,
         get_header_map,
     )
 
+    # Try to build profit summary from the deals sheet
+    deals_data: List[dict] = []
+    try:
+        from backend.services.deals_service import get_all_deals
+        raw_deals = get_all_deals()
+
+        for deal in raw_deals:
+            charged = _to_float(deal.get("charged_with_vat"))
+            vat_amount = _to_float(deal.get("vat_amount"))
+            amount_no_vat = _to_float(deal.get("amount_without_vat"))
+            marginal = _to_float(deal.get("marginal_income"))
+            gross = _to_float(deal.get("gross_profit"))
+            bonus = _to_float(deal.get("manager_bonus_amount"))
+            direction = str(deal.get("business_direction", ""))
+
+            deals_data.append({
+                "deal_id": deal.get("deal_id", ""),
+                "client": deal.get("client", ""),
+                "manager": deal.get("manager", ""),
+                "status": deal.get("status", ""),
+                "business_direction": direction,
+                "project_start_date": deal.get("project_start_date", ""),
+                "charged_with_vat": charged,
+                "vat_amount": vat_amount,
+                "revenue_without_vat": amount_no_vat,
+                "marginal_income": marginal,
+                "gross_profit": gross,
+                "manager_bonus_amount": bonus,
+            })
+    except Exception as exc:
+        logger.warning("Could not read deals for profit report: %s", exc)
+
+    # If we got deals data, return it
+    if deals_data:
+        return _serialise(deals_data, fmt)
+
+    # Fallback: analytics_monthly sheet
     try:
         ws = get_worksheet(SHEET_ANALYTICS_MONTHLY)
         header_map = get_header_map(ws)
@@ -135,3 +189,35 @@ def generate_profit_report(fmt: str = "csv") -> bytes:
         data.append(entry)
 
     return _serialise(data, fmt)
+
+
+def generate_warehouse_revenue_report(fmt: str = "csv") -> bytes:
+    """
+    Return aggregated revenue (with VAT, without VAT, VAT amount) per warehouse
+    from the billing sheets.
+    """
+    from backend.services.sheets_service import BILLING_SHEETS
+    from backend.services.billing_service import get_billing_entries
+
+    combined: List[dict] = []
+    for wh_key in BILLING_SHEETS:
+        entries = get_billing_entries(wh_key)
+        for e in entries:
+            # Support both old and new format
+            client = e.get("client") or e.get("client_name", "")
+            total_with = _to_float(
+                e.get("total_with_vat") or e.get("p1_total_with_penalties")
+            )
+            total_vat = _to_float(e.get("total_vat"))
+            total_no = _to_float(
+                e.get("total_without_vat") or e.get("p1_total_without_penalties")
+            )
+            combined.append({
+                "warehouse": wh_key,
+                "client": client,
+                "total_with_vat": total_with,
+                "total_vat": total_vat,
+                "total_without_vat": total_no,
+                "payment_status": e.get("payment_status", ""),
+            })
+    return _serialise(combined, fmt)

@@ -64,6 +64,9 @@ async def create_expense(
     """
     Add a new expense record to the 'expenses' sheet.
 
+    Accepts both old-style keys (expense_type, amount, vat) and new-style keys
+    (category, amount_with_vat, vat_rate).  New-style keys take priority.
+
     Accessible by: manager, accounting, operations_director, admin.
     """
     user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
@@ -73,9 +76,14 @@ async def create_expense(
     if not check_role(role, EXPENSE_ADD_ROLES):
         raise HTTPException(status_code=403, detail="Access denied")
 
+    expense_data = body.model_dump(exclude_none=True)
+    # Ensure created_by is set to the requesting user when not provided
+    if "created_by" not in expense_data:
+        expense_data["created_by"] = user_id or full_name or role
+
     try:
         result = add_expense(
-            data=body.model_dump(),
+            data=expense_data,
             user=user_id or full_name or role,
             role=role,
         )
