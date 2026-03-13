@@ -13,6 +13,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from backend.routers import deals, settings, auth, dashboard, journal
+from backend.routers import billing, expenses, reports
 from config.config import settings as app_settings, validate_settings
 
 logging.basicConfig(
@@ -80,6 +81,9 @@ app.include_router(settings.router)
 app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(journal.router)
+app.include_router(billing.router)
+app.include_router(expenses.router)
+app.include_router(reports.router)
 
 # Serve miniapp static files if directory exists
 _miniapp_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "miniapp")

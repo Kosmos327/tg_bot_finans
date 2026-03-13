@@ -25,7 +25,108 @@ class MeResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Deal schemas
+# Deal schemas (new structure: deals sheet)
+# ---------------------------------------------------------------------------
+
+class DealNewBase(BaseModel):
+    """Deal fields matching the new 'deals' sheet structure."""
+    client: Optional[str] = None
+    manager: Optional[str] = None
+    city: Optional[str] = None
+    service: Optional[str] = None
+    status: Optional[str] = None
+    revenue_with_vat: Optional[float] = None
+    vat_amount: Optional[float] = None
+    revenue_without_vat: Optional[float] = None
+    paid_amount: Optional[float] = None
+    remaining_amount: Optional[float] = None
+
+
+class DealNewCreate(DealNewBase):
+    pass
+
+
+class DealNewUpdate(BaseModel):
+    client: Optional[str] = None
+    manager: Optional[str] = None
+    city: Optional[str] = None
+    service: Optional[str] = None
+    status: Optional[str] = None
+    revenue_with_vat: Optional[float] = None
+    vat_amount: Optional[float] = None
+    revenue_without_vat: Optional[float] = None
+    paid_amount: Optional[float] = None
+    remaining_amount: Optional[float] = None
+
+
+class PaymentMarkRequest(BaseModel):
+    """Request body for marking a payment on a deal."""
+    deal_id: str
+    payment_amount: float
+    user: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Billing schemas (billing_msk / billing_nsk / billing_ekb sheets)
+# ---------------------------------------------------------------------------
+
+class BillingPeriod(BaseModel):
+    """One billing period block (p1 or p2)."""
+    shipments_amount: Optional[float] = None
+    units: Optional[float] = None
+    storage_amount: Optional[float] = None
+    pallets: Optional[float] = None
+    returns_amount: Optional[float] = None
+    returns_trips: Optional[float] = None
+    extra_services: Optional[float] = None
+    penalties: Optional[float] = None
+    # Calculated automatically by the backend:
+    total_without_penalties: Optional[float] = None
+    total_with_penalties: Optional[float] = None
+
+
+class BillingEntryCreate(BaseModel):
+    """Full billing entry for one client in one warehouse."""
+    client_name: str
+    p1: Optional[BillingPeriod] = None
+    p2: Optional[BillingPeriod] = None
+
+
+class BillingEntryResponse(BillingEntryCreate):
+    row_index: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# Expense schemas (expenses sheet)
+# ---------------------------------------------------------------------------
+
+EXPENSE_TYPES = frozenset({"variable", "production", "logistics", "returns", "extra"})
+
+
+class ExpenseCreate(BaseModel):
+    deal_id: Optional[str] = None
+    expense_type: str
+    amount: float
+    vat: Optional[float] = None
+    amount_without_vat: Optional[float] = None
+
+    @field_validator("expense_type")
+    @classmethod
+    def validate_expense_type(cls, v: str) -> str:
+        if v not in EXPENSE_TYPES:
+            raise ValueError(
+                f"expense_type must be one of: {', '.join(sorted(EXPENSE_TYPES))}"
+            )
+        return v
+
+
+class ExpenseResponse(ExpenseCreate):
+    expense_id: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Deal schemas (legacy structure kept for backward-compat)
 # ---------------------------------------------------------------------------
 
 class DealBase(BaseModel):
@@ -114,7 +215,40 @@ class DashboardResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Journal
+# Financial summary
+# ---------------------------------------------------------------------------
+
+class FinancialSummary(BaseModel):
+    """Aggregated financial metrics."""
+    revenue: float
+    expenses: float
+    gross_profit: float
+    margin_percent: float
+
+
+# ---------------------------------------------------------------------------
+# Journal (new structure: timestamp, user, action, entity, entity_id, details)
+# ---------------------------------------------------------------------------
+
+class JournalEntryNew(BaseModel):
+    timestamp: str
+    user: str
+    action: str
+    entity: str
+    entity_id: str
+    details: str
+
+
+class JournalEntryNewCreate(BaseModel):
+    user: str
+    action: str
+    entity: str
+    entity_id: str = ""
+    details: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Journal (legacy structure, kept for backward-compat)
 # ---------------------------------------------------------------------------
 
 class JournalEntry(BaseModel):
@@ -144,3 +278,4 @@ class SettingsUser(BaseModel):
 
 class SettingsResponse(BaseModel):
     users: List[SettingsUser]
+

@@ -1181,3 +1181,364 @@ select {
 
 .mt-sm { margin-top: var(--spacing-sm); }
 .mt-md { margin-top: var(--spacing-md); }
+
+/* ==========================================
+   AUTH SCREEN
+   ========================================== */
+.auth-screen {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--spacing-lg);
+}
+
+.auth-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-xl);
+  width: 100%;
+  max-width: 400px;
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+
+.auth-logo {
+  font-size: 3rem;
+  margin-bottom: var(--spacing-md);
+}
+
+.auth-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.auth-subtitle {
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-md);
+  font-size: 0.95rem;
+}
+
+.role-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-md);
+}
+
+.role-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 14px var(--spacing-md);
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: left;
+  width: 100%;
+}
+
+.role-btn:hover,
+.role-btn:active {
+  border-color: var(--primary);
+  background: var(--primary-light, rgba(37,99,235,0.07));
+  color: var(--primary);
+}
+
+.role-icon {
+  font-size: 1.4rem;
+  flex-shrink: 0;
+}
+
+.auth-input-wrap {
+  margin: var(--spacing-md) 0;
+}
+
+.auth-input {
+  width: 100%;
+  padding: 14px var(--spacing-md);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 1.1rem;
+  background: var(--bg);
+  color: var(--text-primary);
+  text-align: center;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease;
+}
+
+.auth-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.auth-error {
+  color: var(--error, #ef4444);
+  font-size: 0.9rem;
+  margin-bottom: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  background: rgba(239,68,68,0.08);
+  border-radius: var(--radius-sm);
+}
+
+.auth-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+/* ==========================================
+   SUB-NAVIGATION
+   ========================================== */
+.subnav {
+  display: flex;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--spacing-md);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.subnav-btn {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.subnav-btn.active,
+.subnav-btn:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+/* ==========================================
+   BILLING TOTALS
+   ========================================== */
+.billing-totals {
+  background: var(--bg);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-top: var(--spacing-sm);
+  border: 1px solid var(--border);
+}
+
+.total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+
+.total-row strong {
+  color: var(--text-primary);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+/* ==========================================
+   EXPENSE CALC
+   ========================================== */
+.expense-calc {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--border);
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  margin-top: var(--spacing-xs);
+}
+
+.expense-calc strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+/* ==========================================
+   REPORTS GRID
+   ========================================== */
+.reports-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.report-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--bg);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.report-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.report-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+
+.report-desc {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.report-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+  align-items: center;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+/* ==========================================
+   EXPENSES LIST
+   ========================================== */
+.expenses-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+.expense-row {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.expense-row-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.expense-type-badge {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--primary-light, rgba(37,99,235,0.1));
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.expense-amount {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.expense-row-meta {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+/* ==========================================
+   JOURNAL LIST
+   ========================================== */
+.journal-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+.journal-row {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+}
+
+.journal-row-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.journal-action {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  background: var(--primary-light, rgba(37,99,235,0.07));
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.journal-timestamp {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.journal-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.journal-details {
+  margin-top: 4px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  word-break: break-word;
+}
+
+/* ==========================================
+   SUCCESS BUTTON (payment)
+   ========================================== */
+.btn-success {
+  background: #16a34a;
+  color: #fff;
+  border: none;
+}
+
+.btn-success:hover {
+  background: #15803d;
+}
+

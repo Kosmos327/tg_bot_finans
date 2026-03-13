@@ -73,6 +73,11 @@ async function apiFetch(path, options = {}) {
   if (initData) {
     headers['X-Telegram-Init-Data'] = initData;
   }
+  // Attach stored role for password-auth users
+  if (!headers['X-User-Role']) {
+    const savedRole = localStorage.getItem('user_role');
+    if (savedRole) headers['X-User-Role'] = savedRole;
+  }
 
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -413,10 +418,8 @@ function showForm() {
 // ==========================================
 function initMyDeals() {
   const refreshBtn = document.getElementById('refresh-deals-btn');
-  const gotoNewDeal = document.getElementById('goto-new-deal-btn');
 
   if (refreshBtn) refreshBtn.addEventListener('click', () => loadDeals());
-  if (gotoNewDeal) gotoNewDeal.addEventListener('click', () => switchTab('new-deal'));
 
   // Filters
   ['filter-status', 'filter-client', 'filter-month'].forEach(id => {
@@ -845,11 +848,591 @@ async function init() {
   initMyDeals();
   initModal();
 
-  // Load settings on startup
-  await loadSettings();
-
-  // Show first tab
-  switchTab('new-deal');
+  // Check auth before showing any content
+  const savedRole = localStorage.getItem('user_role');
+  if (savedRole) {
+    await enterApp(savedRole);
+  } else {
+    showAuthScreen();
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ==========================================
+// AUTH SYSTEM
+// ==========================================
+
+const ROLE_LABELS = {
+  manager: 'Менеджер',
+  operations_director: 'Операционный директор',
+  accounting: 'Бухгалтерия',
+  admin: 'Администратор',
+  accountant: 'Бухгалтер',
+  head_of_sales: 'Руководитель отдела продаж',
+};
+
+// Tabs available per role
+const ROLE_TABS = {
+  manager: [
+    { id: 'tab-finances', icon: '💰', label: 'Финансы' },
+    { id: 'tab-billing',  icon: '🏭', label: 'Billing' },
+    { id: 'tab-expenses', icon: '📉', label: 'Расходы' },
+    { id: 'settings-tab', icon: '⚙️', label: 'Настройки' },
+  ],
+  operations_director: [
+    { id: 'tab-finances', icon: '💰', label: 'Финансы' },
+    { id: 'tab-billing',  icon: '🏭', label: 'Billing' },
+    { id: 'tab-expenses', icon: '📉', label: 'Расходы' },
+    { id: 'tab-reports',  icon: '📥', label: 'Отчёты' },
+    { id: 'tab-journal',  icon: '📜', label: 'Журнал' },
+    { id: 'settings-tab', icon: '⚙️', label: 'Настройки' },
+  ],
+  accounting: [
+    { id: 'tab-finances', icon: '💰', label: 'Финансы' },
+    { id: 'tab-expenses', icon: '📉', label: 'Расходы' },
+    { id: 'tab-reports',  icon: '📥', label: 'Отчёты' },
+    { id: 'tab-journal',  icon: '📜', label: 'Журнал' },
+    { id: 'settings-tab', icon: '⚙️', label: 'Настройки' },
+  ],
+  admin: [
+    { id: 'tab-finances', icon: '💰', label: 'Финансы' },
+    { id: 'tab-billing',  icon: '🏭', label: 'Billing' },
+    { id: 'tab-expenses', icon: '📉', label: 'Расходы' },
+    { id: 'tab-reports',  icon: '📥', label: 'Отчёты' },
+    { id: 'tab-journal',  icon: '📜', label: 'Журнал' },
+    { id: 'settings-tab', icon: '⚙️', label: 'Настройки' },
+  ],
+  // Legacy roles
+  accountant: [
+    { id: 'tab-finances', icon: '💰', label: 'Финансы' },
+    { id: 'tab-expenses', icon: '📉', label: 'Расходы' },
+    { id: 'tab-reports',  icon: '📥', label: 'Отчёты' },
+    { id: 'settings-tab', icon: '⚙️', label: 'Настройки' },
+  ],
+  head_of_sales: [
+    { id: 'tab-finances', icon: '💰', label: 'Финансы' },
+    { id: 'tab-reports',  icon: '📥', label: 'Отчёты' },
+    { id: 'settings-tab', icon: '⚙️', label: 'Настройки' },
+  ],
+};
+
+function showAuthScreen() {
+  const authScreen = document.getElementById('auth-screen');
+  const appMain = document.getElementById('app-main');
+  if (authScreen) authScreen.style.display = 'flex';
+  if (appMain) appMain.style.display = 'none';
+
+  initAuthHandlers();
+}
+
+function initAuthHandlers() {
+  let selectedRole = null;
+
+  // Role buttons
+  document.querySelectorAll('.role-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedRole = btn.dataset.role;
+      const label = ROLE_LABELS[selectedRole] || selectedRole;
+      setEl('auth-role-label', label);
+
+      document.getElementById('auth-step-role').style.display = 'none';
+      document.getElementById('auth-step-password').style.display = 'block';
+
+      const pwInput = document.getElementById('auth-password');
+      if (pwInput) {
+        pwInput.value = '';
+        pwInput.focus();
+      }
+
+      const errEl = document.getElementById('auth-error');
+      if (errEl) errEl.style.display = 'none';
+    });
+  });
+
+  // Back button
+  const backBtn = document.getElementById('auth-back-btn');
+  if (backBtn) backBtn.addEventListener('click', () => {
+    document.getElementById('auth-step-role').style.display = 'block';
+    document.getElementById('auth-step-password').style.display = 'none';
+    selectedRole = null;
+  });
+
+  // Submit button
+  const submitBtn = document.getElementById('auth-submit-btn');
+  const pwInput = document.getElementById('auth-password');
+
+  const doLogin = async () => {
+    const password = pwInput ? pwInput.value : '';
+    if (!selectedRole || !password) return;
+
+    submitBtn.disabled = true;
+    const errEl = document.getElementById('auth-error');
+    if (errEl) errEl.style.display = 'none';
+
+    try {
+      const result = await apiFetch('/auth/role-login', {
+        method: 'POST',
+        body: JSON.stringify({ role: selectedRole, password }),
+      });
+
+      if (result.success) {
+        localStorage.setItem('user_role', result.role);
+        localStorage.setItem('user_role_label', result.role_label);
+        await enterApp(result.role);
+      }
+    } catch (err) {
+      if (errEl) {
+        errEl.textContent = 'Неверный пароль. Попробуйте ещё раз.';
+        errEl.style.display = 'block';
+      }
+    } finally {
+      submitBtn.disabled = false;
+    }
+  };
+
+  if (submitBtn) submitBtn.addEventListener('click', doLogin);
+  if (pwInput) pwInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') doLogin();
+  });
+}
+
+async function enterApp(role) {
+  const authScreen = document.getElementById('auth-screen');
+  const appMain = document.getElementById('app-main');
+  if (authScreen) authScreen.style.display = 'none';
+  if (appMain) appMain.style.display = 'block';
+
+  // Update role label in header
+  const roleLabel = localStorage.getItem('user_role_label') || ROLE_LABELS[role] || role;
+  setEl('header-role-label', roleLabel);
+
+  // Build role-specific tabs
+  buildTabs(role);
+
+  // Load settings
+  await loadSettings();
+
+  // Show first tab
+  const firstTab = (ROLE_TABS[role] || ROLE_TABS.manager)[0];
+  switchMainTab(firstTab.id);
+
+  // Setup logout
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) logoutBtn.addEventListener('click', () => {
+    localStorage.removeItem('user_role');
+    localStorage.removeItem('user_role_label');
+    location.reload();
+  });
+
+  // Show user info
+  renderUserInfoCard();
+  updateUserInfoWithRole(role, roleLabel);
+
+  // Init new feature handlers
+  initBillingForm();
+  initExpensesForm();
+  initReportsHandlers();
+  initJournalHandlers();
+  initSubnav();
+}
+
+function buildTabs(role) {
+  const nav = document.getElementById('main-tab-nav');
+  if (!nav) return;
+
+  const tabs = ROLE_TABS[role] || ROLE_TABS.manager;
+  nav.innerHTML = tabs.map((tab, i) => `
+    <button class="tab-btn${i === 0 ? ' active' : ''}"
+      data-tab="${tab.id}" role="tab"
+      aria-selected="${i === 0}">
+      <span class="tab-icon">${tab.icon}</span>
+      <span class="tab-label">${tab.label}</span>
+    </button>
+  `).join('');
+
+  nav.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchMainTab(btn.dataset.tab));
+  });
+}
+
+function switchMainTab(tabId) {
+  // Update nav buttons
+  document.querySelectorAll('#main-tab-nav .tab-btn').forEach(btn => {
+    const active = btn.dataset.tab === tabId;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active);
+  });
+
+  // Show/hide panels
+  document.querySelectorAll('.tab-panel').forEach(panel => {
+    const active = panel.id === tabId;
+    panel.style.display = active ? 'block' : 'none';
+    panel.classList.toggle('active', active);
+  });
+
+  // Side effects
+  if (tabId === 'settings-tab') {
+    checkConnections();
+    renderUserInfoCard();
+  }
+  if (tabId === 'tab-finances' && !document.getElementById('my-deals-sub').style.display) {
+    // show new deal sub by default
+  }
+}
+
+function updateUserInfoWithRole(role, roleLabel) {
+  const content = document.getElementById('user-info-content');
+  if (!content) return;
+
+  const roleRow = `<div class="user-info-row"><span>Роль</span><span><strong>${escHtml(roleLabel)}</strong></span></div>`;
+  content.insertAdjacentHTML('afterbegin', roleRow);
+}
+
+// ==========================================
+// SUB-NAV (Finances tab)
+// ==========================================
+function initSubnav() {
+  document.querySelectorAll('.subnav-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const subId = btn.dataset.sub;
+      document.querySelectorAll('.subnav-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      // Show/hide sub-panels
+      ['new-deal-sub', 'my-deals-sub'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = id === subId ? 'block' : 'none';
+      });
+
+      if (subId === 'my-deals-sub' && state.deals.length === 0) {
+        loadDeals();
+      }
+    });
+  });
+
+  // Override view-deals-btn to switch sub
+  const viewDealsBtn = document.getElementById('view-deals-btn');
+  if (viewDealsBtn) {
+    viewDealsBtn.addEventListener('click', () => {
+      switchMainTab('tab-finances');
+      const myDealsBtn = document.querySelector('.subnav-btn[data-sub="my-deals-sub"]');
+      if (myDealsBtn) myDealsBtn.click();
+    });
+  }
+}
+
+// ==========================================
+// BILLING FORM
+// ==========================================
+function calcBillingTotals(prefix) {
+  const val = (id) => parseFloat(document.getElementById(id)?.value || 0) || 0;
+  const shipments = val(`${prefix}-shipments`);
+  const storage   = val(`${prefix}-storage`);
+  const returns   = val(`${prefix}-returns`);
+  const extra     = val(`${prefix}-extra`);
+  const penalties = val(`${prefix}-penalties`);
+  const totalNoPen = shipments + storage + returns + extra;
+  const totalWithPen = totalNoPen - penalties;
+
+  setEl(`${prefix}-total-no-pen`,   `${totalNoPen.toFixed(2)} ₽`);
+  setEl(`${prefix}-total-with-pen`, `${totalWithPen.toFixed(2)} ₽`);
+}
+
+function initBillingForm() {
+  // Live total calculation
+  ['p1-shipments','p1-storage','p1-returns','p1-extra','p1-penalties'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => calcBillingTotals('p1'));
+  });
+  ['p2-shipments','p2-storage','p2-returns','p2-extra','p2-penalties'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => calcBillingTotals('p2'));
+  });
+
+  // Save billing
+  const saveBtn = document.getElementById('billing-save-btn');
+  if (saveBtn) saveBtn.addEventListener('click', saveBilling);
+
+  // Mark payment
+  const markBtn = document.getElementById('payment-mark-btn');
+  if (markBtn) markBtn.addEventListener('click', markPayment);
+}
+
+async function saveBilling() {
+  const warehouse = document.getElementById('billing-warehouse')?.value;
+  const clientName = document.getElementById('billing-client')?.value?.trim();
+
+  if (!warehouse || !clientName) {
+    showToast('Укажите склад и клиента', 'error');
+    return;
+  }
+
+  const pVal = (id) => {
+    const v = document.getElementById(id)?.value;
+    return v ? parseFloat(v) : null;
+  };
+
+  const body = {
+    client_name: clientName,
+    p1: {
+      shipments_amount:  pVal('p1-shipments'),
+      units:             pVal('p1-units'),
+      storage_amount:    pVal('p1-storage'),
+      pallets:           pVal('p1-pallets'),
+      returns_amount:    pVal('p1-returns'),
+      returns_trips:     pVal('p1-returns-trips'),
+      extra_services:    pVal('p1-extra'),
+      penalties:         pVal('p1-penalties'),
+    },
+    p2: {
+      shipments_amount:  pVal('p2-shipments'),
+      units:             pVal('p2-units'),
+      storage_amount:    pVal('p2-storage'),
+      pallets:           pVal('p2-pallets'),
+      returns_amount:    pVal('p2-returns'),
+      returns_trips:     pVal('p2-returns-trips'),
+      extra_services:    pVal('p2-extra'),
+      penalties:         pVal('p2-penalties'),
+    },
+  };
+
+  try {
+    const role = localStorage.getItem('user_role') || '';
+    await apiFetch(`/billing/${warehouse}`, {
+      method: 'POST',
+      headers: { 'X-User-Role': role },
+      body: JSON.stringify(body),
+    });
+    showToast('Billing сохранён!', 'success');
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+async function markPayment() {
+  const dealId = document.getElementById('payment-deal-id')?.value?.trim();
+  const amount = parseFloat(document.getElementById('payment-amount')?.value || 0);
+
+  if (!dealId) { showToast('Укажите ID сделки', 'error'); return; }
+  if (!amount || amount <= 0) { showToast('Укажите сумму оплаты', 'error'); return; }
+
+  try {
+    const role = localStorage.getItem('user_role') || '';
+    const result = await apiFetch('/billing/payment/mark', {
+      method: 'POST',
+      headers: { 'X-User-Role': role },
+      body: JSON.stringify({ deal_id: dealId, payment_amount: amount }),
+    });
+    showToast(`Оплата ${formatCurrency(amount)} отмечена. Остаток: ${formatCurrency(result.remaining_amount)}`, 'success');
+    document.getElementById('payment-deal-id').value = '';
+    document.getElementById('payment-amount').value = '';
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+// ==========================================
+// EXPENSES FORM
+// ==========================================
+function initExpensesForm() {
+  // Live VAT calc
+  const amountEl = document.getElementById('expense-amount');
+  const vatEl = document.getElementById('expense-vat');
+  const calcEl = document.getElementById('expense-calc-no-vat');
+
+  const updateCalc = () => {
+    const amount = parseFloat(amountEl?.value || 0) || 0;
+    const vat = parseFloat(vatEl?.value || 0) || 0;
+    if (calcEl) calcEl.textContent = `${(amount - vat).toFixed(2)} ₽`;
+  };
+
+  if (amountEl) amountEl.addEventListener('input', updateCalc);
+  if (vatEl) vatEl.addEventListener('input', updateCalc);
+
+  // Save expense
+  const saveBtn = document.getElementById('expense-save-btn');
+  if (saveBtn) saveBtn.addEventListener('click', saveExpense);
+
+  // Load expenses list
+  const loadBtn = document.getElementById('load-expenses-btn');
+  if (loadBtn) loadBtn.addEventListener('click', loadExpenses);
+}
+
+async function saveExpense() {
+  const expenseType = document.getElementById('expense-type')?.value;
+  const amount = parseFloat(document.getElementById('expense-amount')?.value || 0);
+
+  if (!expenseType) { showToast('Выберите тип расхода', 'error'); return; }
+  if (!amount || amount <= 0) { showToast('Укажите сумму расхода', 'error'); return; }
+
+  const dealId = document.getElementById('expense-deal-id')?.value?.trim() || null;
+  const vat = parseFloat(document.getElementById('expense-vat')?.value || 0) || 0;
+
+  try {
+    const role = localStorage.getItem('user_role') || '';
+    await apiFetch('/expenses', {
+      method: 'POST',
+      headers: { 'X-User-Role': role },
+      body: JSON.stringify({
+        deal_id: dealId,
+        expense_type: expenseType,
+        amount,
+        vat,
+        amount_without_vat: amount - vat,
+      }),
+    });
+    showToast('Расход добавлен!', 'success');
+    // Clear form
+    ['expense-deal-id','expense-amount','expense-vat'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    const typeEl = document.getElementById('expense-type');
+    if (typeEl) typeEl.value = '';
+    const calcEl = document.getElementById('expense-calc-no-vat');
+    if (calcEl) calcEl.textContent = '0.00 ₽';
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+async function loadExpenses() {
+  const loadingEl = document.getElementById('expenses-loading');
+  const listEl = document.getElementById('expenses-list');
+  const emptyEl = document.getElementById('expenses-empty');
+
+  if (loadingEl) loadingEl.style.display = 'flex';
+  if (listEl) listEl.innerHTML = '';
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  try {
+    const role = localStorage.getItem('user_role') || '';
+    const data = await apiFetch('/expenses', {
+      headers: { 'X-User-Role': role },
+    });
+
+    if (loadingEl) loadingEl.style.display = 'none';
+
+    if (!data || data.length === 0) {
+      if (emptyEl) emptyEl.style.display = 'flex';
+      return;
+    }
+
+    if (listEl) {
+      listEl.innerHTML = data.map(e => `
+        <div class="expense-row">
+          <div class="expense-row-header">
+            <span class="expense-type-badge">${escHtml(e.expense_type)}</span>
+            <span class="expense-amount">${formatCurrency(parseFloat(e.amount) || 0)}</span>
+          </div>
+          <div class="expense-row-meta">
+            ${e.deal_id ? `<span>Сделка: ${escHtml(e.deal_id)}</span>` : ''}
+            ${e.created_at ? `<span>${escHtml(e.created_at)}</span>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+  } catch (err) {
+    if (loadingEl) loadingEl.style.display = 'none';
+    showToast(`Ошибка загрузки расходов: ${err.message}`, 'error');
+  }
+}
+
+// ==========================================
+// REPORTS
+// ==========================================
+function initReportsHandlers() {
+  document.querySelectorAll('[data-report]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const reportType = btn.dataset.report;
+      const fmt = btn.dataset.fmt;
+      downloadReport(reportType, fmt);
+    });
+  });
+}
+
+async function downloadReport(reportType, fmt) {
+  const role = localStorage.getItem('user_role') || '';
+  let url;
+
+  if (reportType === 'warehouse') {
+    const warehouse = document.getElementById('report-warehouse')?.value || 'msk';
+    url = `/reports/warehouse/${warehouse}?fmt=${fmt}`;
+  } else {
+    url = `/reports/${reportType}?fmt=${fmt}`;
+  }
+
+  try {
+    const headers = { 'X-User-Role': role };
+    const response = await fetch(`${API_BASE}${url}`, { headers });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = `report_${reportType}.${fmt}`;
+    a.click();
+    URL.revokeObjectURL(objectUrl);
+    showToast(`Отчёт скачан (${fmt.toUpperCase()})`, 'success');
+  } catch (err) {
+    showToast(`Ошибка скачивания: ${err.message}`, 'error');
+  }
+}
+
+// ==========================================
+// JOURNAL
+// ==========================================
+function initJournalHandlers() {
+  const loadBtn = document.getElementById('load-journal-btn');
+  if (loadBtn) loadBtn.addEventListener('click', loadJournal);
+}
+
+async function loadJournal() {
+  const loadingEl = document.getElementById('journal-loading');
+  const listEl = document.getElementById('journal-list');
+  const emptyEl = document.getElementById('journal-empty');
+
+  if (loadingEl) loadingEl.style.display = 'flex';
+  if (listEl) listEl.innerHTML = '';
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  try {
+    const role = localStorage.getItem('user_role') || '';
+    const data = await apiFetch('/journal?limit=50', {
+      headers: { 'X-User-Role': role },
+    });
+
+    if (loadingEl) loadingEl.style.display = 'none';
+
+    if (!data || data.length === 0) {
+      if (emptyEl) emptyEl.style.display = 'flex';
+      return;
+    }
+
+    if (listEl) {
+      listEl.innerHTML = data.map(entry => `
+        <div class="journal-row">
+          <div class="journal-row-header">
+            <span class="journal-action">${escHtml(entry.action || '')}</span>
+            <span class="journal-timestamp">${escHtml(entry.timestamp || '')}</span>
+          </div>
+          <div class="journal-row-meta">
+            <span>Пользователь: ${escHtml(entry.user || entry.full_name || entry.telegram_user_id || '—')}</span>
+            ${entry.entity ? `<span>Объект: ${escHtml(entry.entity)}</span>` : ''}
+            ${entry.entity_id ? `<span>ID: ${escHtml(entry.entity_id)}</span>` : ''}
+            ${entry.deal_id ? `<span>Сделка: ${escHtml(entry.deal_id)}</span>` : ''}
+          </div>
+          ${(entry.details || entry.payload_summary) ? `<div class="journal-details">${escHtml(entry.details || entry.payload_summary)}</div>` : ''}
+        </div>
+      `).join('');
+    }
+  } catch (err) {
+    if (loadingEl) loadingEl.style.display = 'none';
+    showToast(`Ошибка загрузки журнала: ${err.message}`, 'error');
+  }
+}

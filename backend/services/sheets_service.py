@@ -39,6 +39,25 @@ SHEET_DEALS = "Учёт сделок"
 SHEET_SETTINGS = "Настройки"
 SHEET_JOURNAL = "Журнал действий"
 
+# New sheet names for updated Google Sheets structure
+SHEET_DEALS_NEW = "deals"
+SHEET_CLIENTS = "clients"
+SHEET_MANAGERS = "managers"
+SHEET_EXPENSES = "expenses"
+SHEET_MANAGER_BONUSES = "manager_bonuses"
+SHEET_BILLING_MSK = "billing_msk"
+SHEET_BILLING_NSK = "billing_nsk"
+SHEET_BILLING_EKB = "billing_ekb"
+SHEET_ANALYTICS_MONTHLY = "analytics_monthly"
+SHEET_SETTINGS_NEW = "settings"
+SHEET_JOURNAL_NEW = "journal"
+
+BILLING_SHEETS = {
+    "msk": SHEET_BILLING_MSK,
+    "nsk": SHEET_BILLING_NSK,
+    "ekb": SHEET_BILLING_EKB,
+}
+
 # ---------------------------------------------------------------------------
 # Custom exceptions
 # ---------------------------------------------------------------------------
