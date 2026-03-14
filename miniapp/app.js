@@ -18,8 +18,9 @@ const API_BASE = (function () {
 })();
 
 // Billing input mode constants (must match backend INPUT_MODE_* values)
-const BILLING_INPUT_MODE_WITH_VAT    = 'с НДС';
-const BILLING_INPUT_MODE_WITHOUT_VAT = 'без НДС';
+const BILLING_INPUT_MODE_WITH_VAT    = 'Новый (с НДС)';
+const BILLING_INPUT_MODE_WITHOUT_VAT = 'Новый (без НДС)';
+const BILLING_INPUT_MODE_OLD         = 'Старый (p1/p2)';
 
 // ==========================================
 // TELEGRAM WEB APP INIT
@@ -1832,7 +1833,8 @@ async function saveBilling() {
 
   const month = document.getElementById('billing-month')?.value || null;
   const half = document.getElementById('billing-half')?.value || null;
-  const period = month ? (half ? `${month}-${half}` : month) : null;
+  // Send month and period as separate fields (new sheet structure).
+  // The combined "YYYY-MM-p1" period value is no longer used.
 
   const pVal = (id) => {
     const v = document.getElementById(id)?.value;
@@ -1844,7 +1846,8 @@ async function saveBilling() {
   if (fmt === 'new' || fmt === 'new-no-vat') {
     body = {
       client: clientName,
-      period,
+      month: month || undefined,
+      period: half || undefined,
       input_mode: fmt === 'new-no-vat' ? BILLING_INPUT_MODE_WITHOUT_VAT : BILLING_INPUT_MODE_WITH_VAT,
       shipments_with_vat:           pVal('bv2-shipments-with-vat'),
       units_count:                  pVal('bv2-units') != null ? parseInt(pVal('bv2-units')) : null,

@@ -44,6 +44,7 @@ _LEGACY_JOURNAL_FIELDS = [
 _NEW_JOURNAL_FIELDS = [
     "timestamp",
     "user",
+    "role",
     "action",
     "entity",
     "entity_id",
@@ -190,6 +191,7 @@ async def write_journal_entry(
     row = [
         timestamp,
         body.user or user_id,
+        body.role or role,
         body.action,
         body.entity,
         body.entity_id,

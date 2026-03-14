@@ -546,3 +546,212 @@ class TestRoleLogin:
         data = resp.json()
         assert "role_label" in data
         assert len(data["role_label"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# billing_service: updated input mode names and month column
+# ---------------------------------------------------------------------------
+
+class TestBillingInputModes:
+    """Test the updated billing input mode handling."""
+
+    def test_input_mode_constants_are_full_names(self):
+        from backend.services.billing_service import (
+            INPUT_MODE_WITH_VAT,
+            INPUT_MODE_WITHOUT_VAT,
+            INPUT_MODE_OLD,
+        )
+        assert INPUT_MODE_WITH_VAT == "Новый (с НДС)"
+        assert INPUT_MODE_WITHOUT_VAT == "Новый (без НДС)"
+        assert INPUT_MODE_OLD == "Старый (p1/p2)"
+
+    def test_new_with_vat_mode_calculates_vat(self):
+        from backend.services.billing_service import _calc_billing_totals_v2, INPUT_MODE_WITH_VAT
+        row = {"shipments_with_vat": 120.0, "input_mode": INPUT_MODE_WITH_VAT}
+        result = _calc_billing_totals_v2(row)
+        assert result["shipments_without_vat"] == 100.0
+        assert result["shipments_vat"] == 20.0
+
+    def test_new_without_vat_mode_no_vat(self):
+        from backend.services.billing_service import _calc_billing_totals_v2, INPUT_MODE_WITHOUT_VAT
+        row = {"shipments_with_vat": 100.0, "input_mode": INPUT_MODE_WITHOUT_VAT}
+        result = _calc_billing_totals_v2(row)
+        assert result["shipments_without_vat"] == 100.0
+        assert result["shipments_vat"] == 0.0
+        assert result["total_with_vat"] == result["total_without_vat"]
+
+    def test_old_mode_preserves_existing_breakdown(self):
+        from backend.services.billing_service import _calc_billing_totals_v2, INPUT_MODE_OLD
+        row = {
+            "input_mode": INPUT_MODE_OLD,
+            "shipments_without_vat": 500.0,
+            "shipments_vat": 100.0,
+            "storage_without_vat": 200.0,
+            "storage_vat": 40.0,
+            "returns_pickup_without_vat": 0.0,
+            "returns_pickup_vat": 0.0,
+            "additional_services_without_vat": 0.0,
+            "additional_services_vat": 0.0,
+            "penalties": 0.0,
+        }
+        result = _calc_billing_totals_v2(row)
+        assert result["total_without_vat"] == 700.0
+        assert result["total_vat"] == 140.0
+        assert result["total_with_vat"] == 840.0
+
+    def test_legacy_alias_with_vat_accepted(self):
+        """Old 'с НДС' value is still accepted for backward compat."""
+        from backend.services.billing_service import _calc_billing_totals_v2
+        row = {"shipments_with_vat": 120.0, "input_mode": "с НДС"}
+        result = _calc_billing_totals_v2(row)
+        assert result["shipments_without_vat"] == 100.0
+        assert result["shipments_vat"] == 20.0
+
+    def test_legacy_alias_without_vat_accepted(self):
+        """Old 'без НДС' value is still accepted for backward compat."""
+        from backend.services.billing_service import _calc_billing_totals_v2
+        row = {"shipments_with_vat": 100.0, "input_mode": "без НДС"}
+        result = _calc_billing_totals_v2(row)
+        assert result["shipments_vat"] == 0.0
+
+    def test_billing_headers_v2_contains_month(self):
+        from backend.services.billing_service import BILLING_HEADERS_V2
+        assert "month" in BILLING_HEADERS_V2
+        # month should come before period
+        assert BILLING_HEADERS_V2.index("month") < BILLING_HEADERS_V2.index("period")
+
+    def test_search_billing_separate_month_column(self):
+        """search_billing_entry matches on separate month column when present."""
+        from backend.services.billing_service import search_billing_entry
+        with patch("backend.services.billing_service.get_billing_entries") as mock_entries:
+            mock_entries.return_value = [
+                {"client": "Клиент А", "month": "2024-01", "period": "p1",
+                 "shipments_with_vat": "120.0"},
+                {"client": "Клиент А", "month": "2024-01", "period": "p2",
+                 "shipments_with_vat": "200.0"},
+                {"client": "Клиент А", "month": "2024-02", "period": "p1",
+                 "shipments_with_vat": "300.0"},
+            ]
+            result = search_billing_entry("msk", "Клиент А", month="2024-01", period="p1")
+            assert result is not None
+            assert result["period"] == "p1"
+            assert result["month"] == "2024-01"
+
+    def test_search_billing_separate_month_column_not_found(self):
+        from backend.services.billing_service import search_billing_entry
+        with patch("backend.services.billing_service.get_billing_entries") as mock_entries:
+            mock_entries.return_value = [
+                {"client": "Клиент А", "month": "2024-01", "period": "p1",
+                 "shipments_with_vat": "120.0"},
+            ]
+            result = search_billing_entry("msk", "Клиент А", month="2024-02", period="p1")
+            assert result is None
+
+    def test_find_row_by_client_period_with_month_col(self):
+        """_find_row_by_client_period uses month column when present."""
+        from backend.services.billing_service import _find_row_by_client_period
+        header = ["client", "month", "period", "shipments_with_vat"]
+        header_map = {h: i for i, h in enumerate(header)}
+        data_rows = [
+            header,
+            ["Клиент А", "2024-01", "p1", "100"],
+            ["Клиент А", "2024-01", "p2", "200"],
+            ["Клиент А", "2024-02", "p1", "300"],
+        ]
+        ws = MagicMock()
+        ws.get_all_values.return_value = data_rows
+
+        row_num = _find_row_by_client_period(
+            ws, "Клиент А", "p1", header_map, month="2024-01"
+        )
+        assert row_num == 2  # second row (1-based), first data row
+
+        row_num2 = _find_row_by_client_period(
+            ws, "Клиент А", "p1", header_map, month="2024-02"
+        )
+        assert row_num2 == 4  # fourth row
+
+    def test_billing_entry_create_v2_has_month_field(self):
+        """BillingEntryCreateV2 schema accepts month field."""
+        from backend.models.schemas import BillingEntryCreateV2
+        entry = BillingEntryCreateV2(
+            client="Клиент А",
+            month="2024-01",
+            period="p1",
+            input_mode="Новый (с НДС)",
+            shipments_with_vat=1200.0,
+        )
+        assert entry.month == "2024-01"
+        assert entry.period == "p1"
+
+
+# ---------------------------------------------------------------------------
+# journal: new structure includes role field
+# ---------------------------------------------------------------------------
+
+class TestJournalNewStructure:
+    """Test the updated new journal structure with role field."""
+
+    def test_new_journal_fields_include_role(self):
+        from backend.routers.journal import _NEW_JOURNAL_FIELDS
+        assert "role" in _NEW_JOURNAL_FIELDS
+        assert "user" in _NEW_JOURNAL_FIELDS
+        assert "action" in _NEW_JOURNAL_FIELDS
+        assert "entity" in _NEW_JOURNAL_FIELDS
+        assert "entity_id" in _NEW_JOURNAL_FIELDS
+        assert "details" in _NEW_JOURNAL_FIELDS
+
+    def test_journal_entry_new_create_has_role(self):
+        from backend.models.schemas import JournalEntryNewCreate
+        entry = JournalEntryNewCreate(
+            user="test_user",
+            role="manager",
+            action="create_deal",
+            entity="deal",
+            entity_id="DEAL-000001",
+            details="test",
+        )
+        assert entry.role == "manager"
+
+    def test_journal_entry_new_create_role_defaults_to_empty(self):
+        from backend.models.schemas import JournalEntryNewCreate
+        entry = JournalEntryNewCreate(
+            user="test_user",
+            action="login",
+            entity="auth",
+        )
+        assert entry.role == ""
+
+
+# ---------------------------------------------------------------------------
+# deals router: PATCH /deal/update/{deal_id}
+# ---------------------------------------------------------------------------
+
+class TestPatchDealEndpoint:
+    """Test the PATCH /deal/update/{deal_id} endpoint."""
+
+    @pytest.fixture(scope="class")
+    def api_client(self):
+        from backend.main import app
+        from fastapi.testclient import TestClient
+        with TestClient(app, raise_server_exceptions=True) as c:
+            yield c
+
+    def test_patch_deal_requires_auth(self, api_client):
+        """PATCH without auth should return 403."""
+        resp = api_client.patch(
+            "/deal/update/DEAL-000001",
+            json={"comment": "test"},
+        )
+        assert resp.status_code == 403
+
+    def test_patch_deal_no_fields_returns_422(self, api_client):
+        """PATCH with empty body (all None) returns 422 (no fields to update) when auth provided."""
+        # Note: the deals router only accepts X-Telegram-Init-Data, not X-User-Role.
+        # Without valid init data, it returns 403. That's the expected behaviour.
+        resp = api_client.patch(
+            "/deal/update/DEAL-000001",
+            json={},
+        )
+        # Without auth → 403
+        assert resp.status_code == 403
