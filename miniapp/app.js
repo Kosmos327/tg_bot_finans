@@ -169,7 +169,7 @@ async function loadSettings() {
     // Use fallback data
     const fallback = {
       statuses: ['Новая', 'В работе', 'Завершена', 'Отменена', 'Приостановлена'],
-      business_directions: ['Разработка', 'Консалтинг', 'Дизайн', 'Маркетинг', 'Другое'],
+      business_directions: ['ФФ МСК', 'ФФ НСК', 'ФФ ЕКБ', 'ТЛК', 'УТЛ'],
       clients: [],
       managers: [],
       vat_types: ['С НДС', 'Без НДС'],
@@ -243,6 +243,22 @@ function initDealForm() {
     const el = document.getElementById(fieldId);
     if (el) el.addEventListener('change', updateSummary);
   });
+
+  // Update "Начислено" label based on VAT type
+  const vatTypeEl = document.getElementById('vat_type');
+  const chargedLabelEl = document.getElementById('charged-label');
+  const updateChargedLabel = () => {
+    if (!chargedLabelEl) return;
+    const vatType = vatTypeEl ? vatTypeEl.value : '';
+    if (vatType === 'С НДС') {
+      chargedLabelEl.innerHTML = 'Начислено с НДС, ₽ <span class="required">*</span>';
+    } else if (vatType === 'Без НДС') {
+      chargedLabelEl.innerHTML = 'Начислено без НДС, ₽ <span class="required">*</span>';
+    } else {
+      chargedLabelEl.innerHTML = 'Начислено, ₽ <span class="required">*</span>';
+    }
+  };
+  if (vatTypeEl) vatTypeEl.addEventListener('change', updateChargedLabel);
 
   // Live VAT calculation in deal form
   const chargedEl = document.getElementById('charged_with_vat');
@@ -727,8 +743,20 @@ function initModal() {
 // ==========================================
 async function checkConnections() {
   // Telegram
-  const hasTg = !!tg && !!tg.initData;
-  setConnectionStatus('telegram', hasTg, hasTg ? 'Подключено' : 'Нет данных');
+  const isInTelegram = !!tg && !!tg.initData;
+  const isTgAvailable = !!tg;
+  let tgStatus, tgOk;
+  if (isInTelegram) {
+    tgOk = true;
+    tgStatus = 'Подключено';
+  } else if (isTgAvailable) {
+    tgOk = false;
+    tgStatus = 'Открыто вне Telegram';
+  } else {
+    tgOk = false;
+    tgStatus = 'Открыто вне Telegram';
+  }
+  setConnectionStatus('telegram', tgOk, tgStatus);
 
   // API
   try {
@@ -882,6 +910,244 @@ async function copyToClipboard(text) {
   } catch (_) {
     showToast('Не удалось скопировать ID', 'error');
   }
+}
+
+// ==========================================
+// SETTINGS MANAGEMENT (Clients, Managers, Directions, Statuses)
+// ==========================================
+
+function initSettingsManagement() {
+  // Clients
+  const addClientBtn = document.getElementById('add-client-btn');
+  const refreshClientsBtn = document.getElementById('refresh-clients-btn');
+  if (addClientBtn) addClientBtn.addEventListener('click', addClient);
+  if (refreshClientsBtn) refreshClientsBtn.addEventListener('click', loadClientsSettings);
+
+  // Managers
+  const addManagerBtn = document.getElementById('add-manager-btn');
+  const refreshManagersBtn = document.getElementById('refresh-managers-btn');
+  if (addManagerBtn) addManagerBtn.addEventListener('click', addManager);
+  if (refreshManagersBtn) refreshManagersBtn.addEventListener('click', loadManagersSettings);
+
+  // Directions
+  const addDirectionBtn = document.getElementById('add-direction-btn');
+  const refreshDirectionsBtn = document.getElementById('refresh-directions-btn');
+  if (addDirectionBtn) addDirectionBtn.addEventListener('click', addDirection);
+  if (refreshDirectionsBtn) refreshDirectionsBtn.addEventListener('click', loadDirectionsSettings);
+
+  // Statuses
+  const addStatusBtn = document.getElementById('add-status-btn');
+  const refreshStatusesBtn = document.getElementById('refresh-statuses-btn');
+  if (addStatusBtn) addStatusBtn.addEventListener('click', addStatus);
+  if (refreshStatusesBtn) refreshStatusesBtn.addEventListener('click', loadStatusesSettings);
+
+  // Load all reference data
+  loadClientsSettings();
+  loadManagersSettings();
+  loadDirectionsSettings();
+  loadStatusesSettings();
+}
+
+// --- Clients ---
+async function loadClientsSettings() {
+  try {
+    const clients = await apiFetch('/settings/clients');
+    renderRefList('clients-list-settings', 'clients-empty-settings', clients, (item) => ({
+      id: item.client_id,
+      label: item.client_name,
+      onDelete: () => deleteClient(item.client_id, item.client_name),
+    }));
+    setEl('cnt-clients', clients.length);
+    // Update select
+    const clientNames = clients.map(c => c.client_name);
+    fillSelect('client', clientNames);
+    fillSelect('filter-client', clientNames, true);
+    if (state.settings) state.settings.clients = clientNames;
+  } catch (err) {
+    console.warn('Could not load clients from settings API:', err);
+  }
+}
+
+async function addClient() {
+  const input = document.getElementById('new-client-name');
+  const name = input ? input.value.trim() : '';
+  if (!name) { showToast('Введите название клиента', 'error'); return; }
+  try {
+    await apiFetch('/settings/clients', { method: 'POST', body: JSON.stringify({ client_name: name }) });
+    if (input) input.value = '';
+    showToast('Клиент добавлен', 'success');
+    await loadClientsSettings();
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+async function deleteClient(clientId, clientName) {
+  if (!confirm(`Удалить клиента "${clientName}"?`)) return;
+  try {
+    await apiFetch(`/settings/clients/${encodeURIComponent(clientId)}`, { method: 'DELETE' });
+    showToast('Клиент удалён', 'success');
+    await loadClientsSettings();
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+// --- Managers ---
+async function loadManagersSettings() {
+  try {
+    const managers = await apiFetch('/settings/managers');
+    renderRefList('managers-list-settings', 'managers-empty-settings', managers, (item) => ({
+      id: item.manager_id,
+      label: `${item.manager_name} (${item.role || 'manager'})`,
+      onDelete: () => deleteManager(item.manager_id, item.manager_name),
+    }));
+    setEl('cnt-managers', managers.length);
+    const managerNames = managers.map(m => m.manager_name);
+    fillSelect('manager', managerNames);
+    if (state.settings) state.settings.managers = managerNames;
+  } catch (err) {
+    console.warn('Could not load managers from settings API:', err);
+  }
+}
+
+async function addManager() {
+  const nameInput = document.getElementById('new-manager-name');
+  const roleInput = document.getElementById('new-manager-role');
+  const name = nameInput ? nameInput.value.trim() : '';
+  const role = roleInput ? roleInput.value : 'manager';
+  if (!name) { showToast('Введите имя менеджера', 'error'); return; }
+  try {
+    await apiFetch('/settings/managers', { method: 'POST', body: JSON.stringify({ manager_name: name, role }) });
+    if (nameInput) nameInput.value = '';
+    showToast('Менеджер добавлен', 'success');
+    await loadManagersSettings();
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+async function deleteManager(managerId, managerName) {
+  if (!confirm(`Удалить менеджера "${managerName}"?`)) return;
+  try {
+    await apiFetch(`/settings/managers/${encodeURIComponent(managerId)}`, { method: 'DELETE' });
+    showToast('Менеджер удалён', 'success');
+    await loadManagersSettings();
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+// --- Directions ---
+async function loadDirectionsSettings() {
+  try {
+    const directions = await apiFetch('/settings/directions');
+    renderRefList('directions-list-settings', 'directions-empty-settings', directions.map(d => ({ value: d })), (item) => ({
+      id: item.value,
+      label: item.value,
+      onDelete: () => deleteDirection(item.value),
+    }));
+    setEl('cnt-directions', directions.length);
+    fillSelect('business_direction', directions);
+    if (state.settings) state.settings.business_directions = directions;
+  } catch (err) {
+    console.warn('Could not load directions from settings API:', err);
+  }
+}
+
+async function addDirection() {
+  const input = document.getElementById('new-direction-name');
+  const name = input ? input.value.trim() : '';
+  if (!name) { showToast('Введите название направления', 'error'); return; }
+  try {
+    await apiFetch('/settings/directions', { method: 'POST', body: JSON.stringify({ value: name }) });
+    if (input) input.value = '';
+    showToast('Направление добавлено', 'success');
+    await loadDirectionsSettings();
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+async function deleteDirection(direction) {
+  if (!confirm(`Удалить направление "${direction}"?`)) return;
+  try {
+    await apiFetch(`/settings/directions/${encodeURIComponent(direction)}`, { method: 'DELETE' });
+    showToast('Направление удалено', 'success');
+    await loadDirectionsSettings();
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+// --- Statuses ---
+async function loadStatusesSettings() {
+  try {
+    const statuses = await apiFetch('/settings/statuses');
+    renderRefList('statuses-list-settings', 'statuses-empty-settings', statuses.map(s => ({ value: s })), (item) => ({
+      id: item.value,
+      label: item.value,
+      onDelete: () => deleteStatus(item.value),
+    }));
+    setEl('cnt-statuses', statuses.length);
+    fillSelect('status', statuses);
+    fillSelect('filter-status', statuses, true);
+    if (state.settings) state.settings.statuses = statuses;
+  } catch (err) {
+    console.warn('Could not load statuses from settings API:', err);
+  }
+}
+
+async function addStatus() {
+  const input = document.getElementById('new-status-name');
+  const name = input ? input.value.trim() : '';
+  if (!name) { showToast('Введите название статуса', 'error'); return; }
+  try {
+    await apiFetch('/settings/statuses', { method: 'POST', body: JSON.stringify({ value: name }) });
+    if (input) input.value = '';
+    showToast('Статус добавлен', 'success');
+    await loadStatusesSettings();
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+async function deleteStatus(status) {
+  if (!confirm(`Удалить статус "${status}"?`)) return;
+  try {
+    await apiFetch(`/settings/statuses/${encodeURIComponent(status)}`, { method: 'DELETE' });
+    showToast('Статус удалён', 'success');
+    await loadStatusesSettings();
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+// --- Generic ref-list renderer ---
+function renderRefList(listId, emptyId, items, itemMapper) {
+  const listEl = document.getElementById(listId);
+  const emptyEl = document.getElementById(emptyId);
+
+  if (!listEl) return;
+  listEl.innerHTML = '';
+
+  if (!items || items.length === 0) {
+    if (emptyEl) emptyEl.style.display = 'flex';
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  items.forEach(item => {
+    const mapped = itemMapper(item);
+    const row = document.createElement('div');
+    row.className = 'ref-list-item';
+    row.innerHTML = `
+      <span class="ref-list-label">${escHtml(mapped.label)}</span>
+      <button class="btn btn-sm btn-danger ref-delete-btn" title="Удалить">🗑</button>
+    `;
+    row.querySelector('.ref-delete-btn').addEventListener('click', mapped.onDelete);
+    listEl.appendChild(row);
+  });
 }
 
 // ==========================================
@@ -1081,6 +1347,7 @@ async function enterApp(role) {
   initReportsHandlers();
   initJournalHandlers();
   initSubnav();
+  initSettingsManagement();
 }
 
 function buildTabs(role) {
@@ -1121,6 +1388,11 @@ function switchMainTab(tabId) {
   if (tabId === 'settings-tab') {
     checkConnections();
     renderUserInfoCard();
+    // Refresh settings reference lists when switching to settings
+    if (typeof loadClientsSettings === 'function') loadClientsSettings();
+    if (typeof loadManagersSettings === 'function') loadManagersSettings();
+    if (typeof loadDirectionsSettings === 'function') loadDirectionsSettings();
+    if (typeof loadStatusesSettings === 'function') loadStatusesSettings();
   }
   if (tabId === 'tab-finances' && !document.getElementById('my-deals-sub').style.display) {
     // show new deal sub by default

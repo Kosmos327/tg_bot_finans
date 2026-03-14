@@ -193,6 +193,24 @@ async def update_deal(
     x_telegram_init_data: Optional[str] = Header(default=None),
 ) -> dict:
     """Update an existing deal (role-based field permissions enforced)."""
+    return await _do_update_deal(deal_id, update, x_telegram_init_data)
+
+
+@router.patch("/update/{deal_id}", response_model=dict)
+async def patch_deal(
+    deal_id: str,
+    update: DealUpdate,
+    x_telegram_init_data: Optional[str] = Header(default=None),
+) -> dict:
+    """Partially update an existing deal — 2-step workflow (add expenses, bonuses, comments later)."""
+    return await _do_update_deal(deal_id, update, x_telegram_init_data)
+
+
+async def _do_update_deal(
+    deal_id: str,
+    update: DealUpdate,
+    x_telegram_init_data: Optional[str],
+) -> dict:
     user_id, role, full_name = _resolve_user(x_telegram_init_data)
 
     if role == NO_ACCESS_ROLE:

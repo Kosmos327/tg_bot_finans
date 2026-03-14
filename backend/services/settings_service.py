@@ -36,6 +36,7 @@ from backend.services.sheets_service import (
     SheetNotFoundError,
     SHEET_SETTINGS,
     get_worksheet,
+    get_or_create_worksheet,
 )
 from backend.services.permissions import ALLOWED_ROLES, NO_ACCESS_ROLE
 
@@ -64,7 +65,7 @@ _SECTION_LOOKUP: Dict[str, tuple] = {
 # Default fallback values when a section is empty / missing
 _DEFAULTS: Dict[str, List[str]] = {
     "statuses": ["Новая", "В работе", "Завершена", "Отменена", "Приостановлена"],
-    "business_directions": ["Разработка", "Консалтинг", "Дизайн", "Маркетинг", "Другое"],
+    "business_directions": ["ФФ МСК", "ФФ НСК", "ФФ ЕКБ", "ТЛК", "УТЛ"],
     "clients": [],
     "managers": [],
     "vat_types": ["С НДС", "Без НДС"],
@@ -272,6 +273,7 @@ def load_all_settings() -> dict:
     """
     Load all sections from the settings sheet in a single round-trip.
     Returns a dict with all section keys.
+    Clients and managers are loaded from their dedicated sheets.
     """
     try:
         ws = get_worksheet(SHEET_SETTINGS)
@@ -284,14 +286,166 @@ def load_all_settings() -> dict:
                 return list(_DEFAULTS.get(key, []))
             return data
 
-        return {
+        settings_data = {
             "statuses": _with_defaults("statuses"),
             "business_directions": _with_defaults("business_directions"),
-            "clients": _with_defaults("clients"),
-            "managers": _with_defaults("managers"),
             "vat_types": _with_defaults("vat_types"),
             "sources": _with_defaults("sources"),
         }
     except (SheetNotFoundError, SheetsError) as exc:
-        logger.error("Failed to load all settings: %s", exc)
-        return {k: list(v) for k, v in _DEFAULTS.items() if k != "roles_mapping"}
+        logger.error("Failed to load settings: %s", exc)
+        settings_data = {
+            "statuses": list(_DEFAULTS["statuses"]),
+            "business_directions": list(_DEFAULTS["business_directions"]),
+            "vat_types": list(_DEFAULTS["vat_types"]),
+            "sources": list(_DEFAULTS["sources"]),
+        }
+
+    # Load clients and managers from their dedicated sheets
+    try:
+        from backend.services.clients_service import get_clients
+        clients_records = get_clients()
+        clients = [r["client_name"] for r in clients_records if r.get("client_name")]
+        if not clients:
+            clients = list(_DEFAULTS.get("clients", []))
+    except Exception as exc:
+        logger.warning("Failed to load clients from sheet: %s", exc)
+        clients = list(_DEFAULTS.get("clients", []))
+
+    try:
+        from backend.services.managers_service import get_managers
+        managers_records = get_managers()
+        managers = [r["manager_name"] for r in managers_records if r.get("manager_name")]
+        if not managers:
+            managers = list(_DEFAULTS.get("managers", []))
+    except Exception as exc:
+        logger.warning("Failed to load managers from sheet: %s", exc)
+        managers = list(_DEFAULTS.get("managers", []))
+
+    return {
+        **settings_data,
+        "clients": clients,
+        "managers": managers,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Section management helpers (add/delete items in simple list sections)
+# ---------------------------------------------------------------------------
+
+
+def _rewrite_settings_sheet(ws, updated_sections: Dict[str, List[str]]) -> None:
+    """
+    Rewrite the entire settings sheet preserving all sections, but replacing
+    the values in *updated_sections*.
+
+    This function reads the current sheet, updates the in-memory representation,
+    then clears and rewrites the sheet.
+    """
+    all_values = ws.get_all_values()
+    parsed = parse_settings_sheet(all_values)
+
+    # Merge updates
+    for key, values in updated_sections.items():
+        parsed[key] = values
+
+    # Build new rows
+    rows = []
+    for header_text, key, is_table in _SECTION_DEFS:
+        if is_table:
+            continue  # Don't rewrite roles table via this helper
+        values = parsed.get(key, [])
+        if not values:
+            continue
+        rows.append([header_text])
+        for val in values:
+            rows.append([val])
+        rows.append([""])  # blank row between sections
+
+    ws.clear()
+    if rows:
+        ws.update(rows, value_input_option="USER_ENTERED")
+
+
+def add_direction(direction: str) -> List[str]:
+    """Add a new direction to the settings sheet. Returns updated list."""
+    direction = direction.strip()
+    if not direction:
+        raise ValueError("direction cannot be empty")
+
+    try:
+        ws = get_or_create_worksheet(SHEET_SETTINGS)
+    except SheetsError as exc:
+        raise SheetsError(f"Could not access settings sheet: {exc}") from exc
+
+    all_values = ws.get_all_values()
+    parsed = parse_settings_sheet(all_values)
+    directions = parsed.get("business_directions", [])
+    if not directions:
+        directions = list(_DEFAULTS["business_directions"])
+
+    if direction not in directions:
+        directions.append(direction)
+        _rewrite_settings_sheet(ws, {"business_directions": directions})
+
+    return directions
+
+
+def delete_direction(direction: str) -> List[str]:
+    """Remove a direction from the settings sheet. Returns updated list."""
+    try:
+        ws = get_or_create_worksheet(SHEET_SETTINGS)
+    except SheetsError as exc:
+        raise SheetsError(f"Could not access settings sheet: {exc}") from exc
+
+    all_values = ws.get_all_values()
+    parsed = parse_settings_sheet(all_values)
+    directions = parsed.get("business_directions", [])
+    if not directions:
+        directions = list(_DEFAULTS["business_directions"])
+
+    directions = [d for d in directions if d != direction]
+    _rewrite_settings_sheet(ws, {"business_directions": directions})
+    return directions
+
+
+def add_status(status: str) -> List[str]:
+    """Add a new status to the settings sheet. Returns updated list."""
+    status = status.strip()
+    if not status:
+        raise ValueError("status cannot be empty")
+
+    try:
+        ws = get_or_create_worksheet(SHEET_SETTINGS)
+    except SheetsError as exc:
+        raise SheetsError(f"Could not access settings sheet: {exc}") from exc
+
+    all_values = ws.get_all_values()
+    parsed = parse_settings_sheet(all_values)
+    statuses = parsed.get("statuses", [])
+    if not statuses:
+        statuses = list(_DEFAULTS["statuses"])
+
+    if status not in statuses:
+        statuses.append(status)
+        _rewrite_settings_sheet(ws, {"statuses": statuses})
+
+    return statuses
+
+
+def delete_status(status: str) -> List[str]:
+    """Remove a status from the settings sheet. Returns updated list."""
+    try:
+        ws = get_or_create_worksheet(SHEET_SETTINGS)
+    except SheetsError as exc:
+        raise SheetsError(f"Could not access settings sheet: {exc}") from exc
+
+    all_values = ws.get_all_values()
+    parsed = parse_settings_sheet(all_values)
+    statuses = parsed.get("statuses", [])
+    if not statuses:
+        statuses = list(_DEFAULTS["statuses"])
+
+    statuses = [s for s in statuses if s != status]
+    _rewrite_settings_sheet(ws, {"statuses": statuses})
+    return statuses

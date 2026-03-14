@@ -76,7 +76,7 @@
             <section class="card">
               <div class="card-header"><span class="section-icon">💰</span><h2>Финансы</h2></div>
               <div class="field-group">
-                <div class="field"><label for="charged_with_vat">Начислено с НДС, ₽ <span class="required">*</span></label><div class="input-wrapper"><input type="number" id="charged_with_vat" name="charged_with_vat" placeholder="0.00" min="0" step="0.01" required /><span class="input-suffix">₽</span></div><span class="field-error" id="charged_with_vat-error"></span></div>
+                <div class="field"><label for="charged_with_vat" id="charged-label">Начислено, ₽ <span class="required">*</span></label><div class="input-wrapper"><input type="number" id="charged_with_vat" name="charged_with_vat" placeholder="0.00" min="0" step="0.01" required /><span class="input-suffix">₽</span></div><span class="field-error" id="charged_with_vat-error"></span></div>
                 <div class="field"><label for="vat_type">Наличие НДС <span class="required">*</span></label><div class="select-wrapper"><select id="vat_type" name="vat_type" required><option value="">Выберите...</option></select></div><span class="field-error" id="vat_type-error"></span></div>
                 <div class="field"><label for="vat_rate">Ставка НДС (доля, напр. 0.20 для 20%)</label><div class="input-wrapper"><input type="number" id="vat_rate" name="vat_rate" placeholder="0.20" min="0" max="1" step="0.01" /><span class="input-suffix">доля</span></div></div>
                 <div class="vat-calc-row" id="deal-vat-calc" style="display:none;">
@@ -318,6 +318,72 @@
             <div class="settings-stat"><span class="stat-icon">🏢</span><div><div class="stat-label">Направления</div><div class="stat-value" id="cnt-directions">—</div></div></div>
           </div>
         </section>
+
+        <!-- CLIENTS MANAGEMENT -->
+        <section class="card">
+          <div class="card-header">
+            <span class="section-icon">👥</span><h2>Клиенты</h2>
+            <button class="btn btn-sm btn-outline" id="refresh-clients-btn">🔄</button>
+          </div>
+          <div class="field-group">
+            <div class="field-row">
+              <div class="field" style="flex:1"><input type="text" id="new-client-name" placeholder="Название клиента..." /></div>
+              <button class="btn btn-sm btn-primary" id="add-client-btn" style="align-self:flex-end">➕ Добавить</button>
+            </div>
+          </div>
+          <div id="clients-list-settings" class="ref-list"></div>
+          <div id="clients-empty-settings" class="empty-state" style="display:none;"><div class="empty-icon">👥</div><p>Клиентов нет</p></div>
+        </section>
+
+        <!-- MANAGERS MANAGEMENT -->
+        <section class="card">
+          <div class="card-header">
+            <span class="section-icon">👤</span><h2>Менеджеры</h2>
+            <button class="btn btn-sm btn-outline" id="refresh-managers-btn">🔄</button>
+          </div>
+          <div class="field-group">
+            <div class="field-row">
+              <div class="field" style="flex:1"><input type="text" id="new-manager-name" placeholder="Имя менеджера..." /></div>
+              <div class="field" style="flex:0 0 120px"><div class="select-wrapper"><select id="new-manager-role"><option value="manager">Менеджер</option><option value="operations_director">Директор</option><option value="accounting">Бухгалтерия</option><option value="admin">Администратор</option></select></div></div>
+              <button class="btn btn-sm btn-primary" id="add-manager-btn" style="align-self:flex-end">➕ Добавить</button>
+            </div>
+          </div>
+          <div id="managers-list-settings" class="ref-list"></div>
+          <div id="managers-empty-settings" class="empty-state" style="display:none;"><div class="empty-icon">👤</div><p>Менеджеров нет</p></div>
+        </section>
+
+        <!-- DIRECTIONS MANAGEMENT -->
+        <section class="card">
+          <div class="card-header">
+            <span class="section-icon">🏢</span><h2>Направления</h2>
+            <button class="btn btn-sm btn-outline" id="refresh-directions-btn">🔄</button>
+          </div>
+          <div class="field-group">
+            <div class="field-row">
+              <div class="field" style="flex:1"><input type="text" id="new-direction-name" placeholder="Название направления..." /></div>
+              <button class="btn btn-sm btn-primary" id="add-direction-btn" style="align-self:flex-end">➕ Добавить</button>
+            </div>
+          </div>
+          <div id="directions-list-settings" class="ref-list"></div>
+          <div id="directions-empty-settings" class="empty-state" style="display:none;"><div class="empty-icon">🏢</div><p>Направлений нет</p></div>
+        </section>
+
+        <!-- STATUSES MANAGEMENT -->
+        <section class="card">
+          <div class="card-header">
+            <span class="section-icon">📌</span><h2>Статусы сделок</h2>
+            <button class="btn btn-sm btn-outline" id="refresh-statuses-btn">🔄</button>
+          </div>
+          <div class="field-group">
+            <div class="field-row">
+              <div class="field" style="flex:1"><input type="text" id="new-status-name" placeholder="Название статуса..." /></div>
+              <button class="btn btn-sm btn-primary" id="add-status-btn" style="align-self:flex-end">➕ Добавить</button>
+            </div>
+          </div>
+          <div id="statuses-list-settings" class="ref-list"></div>
+          <div id="statuses-empty-settings" class="empty-state" style="display:none;"><div class="empty-icon">📌</div><p>Статусов нет</p></div>
+        </section>
+
         <section class="card">
           <div class="card-header"><span class="section-icon">🔌</span><h2>Статус подключений</h2></div>
           <div class="connection-list">

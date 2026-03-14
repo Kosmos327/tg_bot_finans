@@ -131,6 +131,19 @@ def get_worksheet(name: str) -> gspread.Worksheet:
         raise SheetNotFoundError(f"Sheet '{name}' not found in spreadsheet") from exc
 
 
+def get_or_create_worksheet(name: str, rows: int = 1000, cols: int = 30) -> gspread.Worksheet:
+    """Return a worksheet by name, creating it with a header row if it does not exist."""
+    try:
+        return get_spreadsheet().worksheet(name)
+    except gspread.exceptions.WorksheetNotFound:
+        logger.info("Sheet '%s' not found; creating it.", name)
+        try:
+            spreadsheet = get_spreadsheet()
+            return spreadsheet.add_worksheet(title=name, rows=rows, cols=cols)
+        except Exception as exc:
+            raise SheetsError(f"Failed to create sheet '{name}': {exc}") from exc
+
+
 # ---------------------------------------------------------------------------
 # Header-mapping helpers (pure-ish, only need the worksheet for reading)
 # ---------------------------------------------------------------------------
