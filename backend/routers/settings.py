@@ -1,8 +1,10 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.database import get_db
 from backend.models.settings import (
     SettingsResponse,
     ClientCreate,
@@ -14,7 +16,6 @@ from backend.models.settings import (
 )
 from backend.services import settings_service
 from backend.services.journal_service import append_new_journal_entry
-from backend.services.sheets_service import SheetsError
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +52,10 @@ def _actor(init_data: Optional[str], role_header: Optional[str]) -> tuple:
 
 
 @router.get("/settings", response_model=SettingsResponse)
-async def get_settings() -> SettingsResponse:
-    """Load reference data from the 'Настройки' sheet."""
+async def get_settings(db: AsyncSession = Depends(get_db)) -> SettingsResponse:
+    """Load reference data from PostgreSQL."""
     try:
-        data = settings_service.load_all_settings()
+        data = await settings_service.load_all_settings_pg(db)
         return SettingsResponse(**data)
     except Exception as exc:
         logger.error("Error loading settings: %s", exc)
@@ -66,11 +67,11 @@ async def get_settings() -> SettingsResponse:
 # ---------------------------------------------------------------------------
 
 @router.get("/settings/clients", response_model=List[Dict[str, Any]])
-async def list_clients() -> List[Dict[str, Any]]:
-    """Return all clients."""
+async def list_clients(db: AsyncSession = Depends(get_db)) -> List[Dict[str, Any]]:
+    """Return all clients from PostgreSQL."""
     try:
         from backend.services.clients_service import get_clients
-        return get_clients()
+        return await get_clients(db)
     except Exception as exc:
         logger.error("Error listing clients: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -79,13 +80,14 @@ async def list_clients() -> List[Dict[str, Any]]:
 @router.post("/settings/clients", response_model=Dict[str, Any])
 async def create_client(
     body: ClientCreate,
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
-    """Add a new client."""
+    """Add a new client to PostgreSQL."""
     try:
         from backend.services.clients_service import add_client
-        result = add_client(body.client_name)
+        result = await add_client(db, body.client_name)
         user_id, role = _actor(x_telegram_init_data, x_user_role)
         append_new_journal_entry(
             user=user_id,
@@ -98,8 +100,8 @@ async def create_client(
         return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except SheetsError as exc:
-        logger.error("Sheets error creating client: %s", exc)
+    except Exception as exc:
+        logger.error("Error creating client: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -107,17 +109,18 @@ async def create_client(
 async def update_client(
     client_id: str,
     body: ClientUpdate,
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     """Update a client's name."""
     try:
         from backend.services.clients_service import update_client as svc_update
-        result = svc_update(client_id, body.client_name)
+        result = await svc_update(db, client_id, body.client_name)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except SheetsError as exc:
-        logger.error("Sheets error updating client %s: %s", client_id, exc)
+    except Exception as exc:
+        logger.error("Error updating client %s: %s", client_id, exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     if result is None:
@@ -138,15 +141,16 @@ async def update_client(
 @router.delete("/settings/clients/{client_id}", response_model=Dict[str, Any])
 async def delete_client(
     client_id: str,
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     """Delete a client by ID."""
     try:
         from backend.services.clients_service import delete_client as svc_delete
-        deleted = svc_delete(client_id)
-    except SheetsError as exc:
-        logger.error("Sheets error deleting client %s: %s", client_id, exc)
+        deleted = await svc_delete(db, client_id)
+    except Exception as exc:
+        logger.error("Error deleting client %s: %s", client_id, exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     if not deleted:
@@ -169,11 +173,11 @@ async def delete_client(
 # ---------------------------------------------------------------------------
 
 @router.get("/settings/managers", response_model=List[Dict[str, Any]])
-async def list_managers() -> List[Dict[str, Any]]:
-    """Return all managers."""
+async def list_managers(db: AsyncSession = Depends(get_db)) -> List[Dict[str, Any]]:
+    """Return all managers from PostgreSQL."""
     try:
         from backend.services.managers_service import get_managers
-        return get_managers()
+        return await get_managers(db)
     except Exception as exc:
         logger.error("Error listing managers: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -182,13 +186,14 @@ async def list_managers() -> List[Dict[str, Any]]:
 @router.post("/settings/managers", response_model=Dict[str, Any])
 async def create_manager(
     body: ManagerCreate,
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
-    """Add a new manager."""
+    """Add a new manager to PostgreSQL."""
     try:
         from backend.services.managers_service import add_manager
-        result = add_manager(body.manager_name, body.role or "manager")
+        result = await add_manager(db, body.manager_name, body.role or "manager")
         user_id, role = _actor(x_telegram_init_data, x_user_role)
         append_new_journal_entry(
             user=user_id,
@@ -201,8 +206,8 @@ async def create_manager(
         return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except SheetsError as exc:
-        logger.error("Sheets error creating manager: %s", exc)
+    except Exception as exc:
+        logger.error("Error creating manager: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -210,17 +215,18 @@ async def create_manager(
 async def update_manager(
     manager_id: str,
     body: ManagerUpdate,
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     """Update a manager's name and/or role."""
     try:
         from backend.services.managers_service import update_manager as svc_update
-        result = svc_update(manager_id, body.manager_name, body.role)
+        result = await svc_update(db, manager_id, body.manager_name, body.role)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except SheetsError as exc:
-        logger.error("Sheets error updating manager %s: %s", manager_id, exc)
+    except Exception as exc:
+        logger.error("Error updating manager %s: %s", manager_id, exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     if result is None:
@@ -241,15 +247,16 @@ async def update_manager(
 @router.delete("/settings/managers/{manager_id}", response_model=Dict[str, Any])
 async def delete_manager(
     manager_id: str,
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     """Delete a manager by ID."""
     try:
         from backend.services.managers_service import delete_manager as svc_delete
-        deleted = svc_delete(manager_id)
-    except SheetsError as exc:
-        logger.error("Sheets error deleting manager %s: %s", manager_id, exc)
+        deleted = await svc_delete(db, manager_id)
+    except Exception as exc:
+        logger.error("Error deleting manager %s: %s", manager_id, exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     if not deleted:
@@ -272,34 +279,40 @@ async def delete_manager(
 # ---------------------------------------------------------------------------
 
 @router.get("/settings/directions", response_model=List[str])
-async def list_directions() -> List[str]:
-    """Return all business directions."""
+async def list_directions(db: AsyncSession = Depends(get_db)) -> List[str]:
+    """Return all business directions from PostgreSQL."""
     try:
-        return settings_service.load_business_directions()
+        return await settings_service.load_business_directions_pg(db)
     except Exception as exc:
         logger.error("Error listing directions: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/settings/directions", response_model=List[str])
-async def add_direction(body: DirectionItem) -> List[str]:
+async def add_direction(
+    body: DirectionItem,
+    db: AsyncSession = Depends(get_db),
+) -> List[str]:
     """Add a new direction."""
     try:
-        return settings_service.add_direction(body.value)
+        return await settings_service.add_direction_pg(db, body.value)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except SheetsError as exc:
-        logger.error("Sheets error adding direction: %s", exc)
+    except Exception as exc:
+        logger.error("Error adding direction: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.delete("/settings/directions/{direction}", response_model=List[str])
-async def remove_direction(direction: str) -> List[str]:
+async def remove_direction(
+    direction: str,
+    db: AsyncSession = Depends(get_db),
+) -> List[str]:
     """Remove a direction."""
     try:
-        return settings_service.delete_direction(direction)
-    except SheetsError as exc:
-        logger.error("Sheets error deleting direction: %s", exc)
+        return await settings_service.delete_direction_pg(db, direction)
+    except Exception as exc:
+        logger.error("Error deleting direction: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -308,32 +321,39 @@ async def remove_direction(direction: str) -> List[str]:
 # ---------------------------------------------------------------------------
 
 @router.get("/settings/statuses", response_model=List[str])
-async def list_statuses() -> List[str]:
-    """Return all deal statuses."""
+async def list_statuses(db: AsyncSession = Depends(get_db)) -> List[str]:
+    """Return all deal statuses from PostgreSQL."""
     try:
-        return settings_service.load_statuses()
+        return await settings_service.load_statuses_pg(db)
     except Exception as exc:
         logger.error("Error listing statuses: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/settings/statuses", response_model=List[str])
-async def add_status(body: StatusItem) -> List[str]:
+async def add_status(
+    body: StatusItem,
+    db: AsyncSession = Depends(get_db),
+) -> List[str]:
     """Add a new status."""
     try:
-        return settings_service.add_status(body.value)
+        return await settings_service.add_status_pg(db, body.value)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except SheetsError as exc:
-        logger.error("Sheets error adding status: %s", exc)
+    except Exception as exc:
+        logger.error("Error adding status: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.delete("/settings/statuses/{status}", response_model=List[str])
-async def remove_status(status: str) -> List[str]:
+async def remove_status(
+    status: str,
+    db: AsyncSession = Depends(get_db),
+) -> List[str]:
     """Remove a status."""
     try:
-        return settings_service.delete_status(status)
-    except SheetsError as exc:
-        logger.error("Sheets error deleting status: %s", exc)
+        return await settings_service.delete_status_pg(db, status)
+    except Exception as exc:
+        logger.error("Error deleting status: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+

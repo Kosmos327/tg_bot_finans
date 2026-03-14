@@ -46,22 +46,37 @@ def validate_settings() -> None:
     to fail fast with a clear error message if any required variable is missing.
 
     Required variables:
-      - TELEGRAM_BOT_TOKEN
-      - WEBAPP_URL
       - DATABASE_URL
 
-    Optional variables:
+    Optional variables (warnings only — bot polling is gated by RUN_BOT flag):
+      - TELEGRAM_BOT_TOKEN  (required only when RUN_BOT=true)
+      - WEBAPP_URL
       - API_BASE_URL (frontend fallback to same-origin if not set)
     """
-    missing = []
-    if not settings.telegram_bot_token:
-        missing.append("TELEGRAM_BOT_TOKEN")
-    if not settings.webapp_url:
-        missing.append("WEBAPP_URL")
+    import logging
+    import os
+    _logger = logging.getLogger(__name__)
+
     if not settings.database_url:
-        missing.append("DATABASE_URL")
-    if missing:
         raise RuntimeError(
-            f"Missing required environment variables: {', '.join(missing)}. "
-            "Set them in your environment or in a .env file."
+            "Missing required environment variable: DATABASE_URL. "
+            "Set it in your environment or in a .env file."
+        )
+
+    run_bot = os.getenv("RUN_BOT", "false").lower() == "true"
+    if run_bot and not settings.telegram_bot_token:
+        raise RuntimeError(
+            "Missing required environment variable: TELEGRAM_BOT_TOKEN "
+            "(required when RUN_BOT=true). "
+            "Set it in your environment or in a .env file."
+        )
+
+    if not settings.telegram_bot_token:
+        _logger.warning(
+            "TELEGRAM_BOT_TOKEN is not set. "
+            "Telegram bot polling will be disabled unless RUN_BOT=true is also set."
+        )
+    if not settings.webapp_url:
+        _logger.warning(
+            "WEBAPP_URL is not set. Mini App deep-links will not work correctly."
         )

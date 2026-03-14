@@ -9,9 +9,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
-from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
-
 from backend.routers import deals, settings, auth, dashboard, journal
 from backend.routers import billing, expenses, reports, receivables
 from config.config import settings as app_settings, validate_settings
@@ -25,27 +22,51 @@ logger = logging.getLogger(__name__)
 # Validate required environment variables at startup
 validate_settings()
 
+# Whether to start Telegram bot polling alongside the API server.
+# Set RUN_BOT=true in the environment to enable polling.
+# When RUN_BOT=false (default), only the FastAPI server runs — useful
+# when a separate bot process handles polling, or to avoid conflict errors.
+RUN_BOT: bool = os.getenv("RUN_BOT", "false").lower() == "true"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Start Telegram bot polling alongside FastAPI."""
-    from bot.handlers import router as bot_router
-
+    """Optionally start Telegram bot polling alongside FastAPI."""
     polling_task = None
     bot = None
-    try:
-        bot = Bot(token=app_settings.telegram_bot_token)
-        dp = Dispatcher(storage=MemoryStorage())
-        dp.include_router(bot_router)
 
-        polling_task = asyncio.create_task(
-            dp.start_polling(bot, skip_updates=True)
-        )
-        app.state.bot_polling_task = polling_task
-        logger.info("FastAPI started")
-        logger.info("Telegram bot polling started")
-    except Exception as exc:
-        logger.warning("Telegram bot polling NOT started: %s", exc)
+    if RUN_BOT:
+        from aiogram import Bot, Dispatcher
+        from aiogram.fsm.storage.memory import MemoryStorage
+        from aiogram.exceptions import TelegramConflictError
+
+        try:
+            from bot.handlers import router as bot_router
+
+            bot = Bot(token=app_settings.telegram_bot_token)
+            dp = Dispatcher(storage=MemoryStorage())
+            dp.include_router(bot_router)
+
+            polling_task = asyncio.create_task(
+                dp.start_polling(bot, skip_updates=True)
+            )
+            app.state.bot_polling_task = polling_task
+            logger.info("Telegram bot polling started")
+        except TelegramConflictError as exc:
+            logger.error(
+                "TelegramConflictError: %s. "
+                "Another bot instance is already running. "
+                "Set RUN_BOT=false or stop the other instance.",
+                exc,
+            )
+            polling_task = None
+        except Exception as exc:
+            logger.warning("Telegram bot polling NOT started: %s", exc)
+            polling_task = None
+    else:
+        logger.info("RUN_BOT=false — Telegram bot polling is disabled")
+
+    logger.info("FastAPI started")
 
     try:
         yield
@@ -57,8 +78,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             except BaseException:
                 pass
         if bot is not None:
-            await bot.session.close()
-        logger.info("Telegram bot polling stopped")
+            try:
+                await bot.session.close()
+            except Exception:
+                pass
+        logger.info("FastAPI shutdown complete")
 
 
 app = FastAPI(

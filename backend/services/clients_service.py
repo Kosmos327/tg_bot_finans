@@ -1,172 +1,102 @@
 """
-clients_service.py – CRUD operations for the 'clients' sheet.
-
-Sheet columns:
-  client_id | client_name | created_at
+clients_service.py – Async CRUD operations for the 'clients' table via PostgreSQL.
 
 Public API
 ----------
-get_clients()                      → List[dict]
-add_client(client_name)            → dict
-update_client(client_id, name)     → dict | None
-delete_client(client_id)           → bool
+get_clients(db)                          → List[dict]
+add_client(db, client_name)              → dict
+update_client(db, client_id, name)       → dict | None
+delete_client(db, client_id)             → bool
 """
 
 import logging
-import threading
-import uuid
-from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from backend.services.sheets_service import (
-    SHEET_CLIENTS,
-    SheetsError,
-    get_or_create_worksheet,
-    get_header_map,
-)
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database.models import Client
 
 logger = logging.getLogger(__name__)
 
-_lock = threading.Lock()
 
-CLIENTS_HEADERS: List[str] = ["client_id", "client_name", "created_at"]
-
-
-def _ensure_headers(ws) -> None:
-    """Write the canonical header row if the sheet is empty."""
-    try:
-        existing = ws.row_values(1)
-        if not any(c.strip() for c in existing):
-            ws.append_row(CLIENTS_HEADERS, value_input_option="USER_ENTERED")
-            logger.info("Created clients header row.")
-    except Exception as exc:
-        logger.warning("Could not ensure clients headers: %s", exc)
+def _client_to_dict(client: Client) -> Dict:
+    """Convert a Client ORM object to the dict format expected by the Mini App."""
+    return {
+        "client_id": str(client.id),
+        "client_name": client.name,
+        "created_at": (
+            client.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            if client.created_at
+            else ""
+        ),
+    }
 
 
-def _row_to_dict(header_map: Dict[str, int], row: List[str]) -> Dict[str, str]:
-    result: Dict[str, str] = {}
-    for col_name, idx in header_map.items():
-        result[col_name] = row[idx] if idx < len(row) else ""
-    return result
+async def get_clients(db: AsyncSession) -> List[dict]:
+    """Return all active clients from the clients table."""
+    result = await db.execute(
+        select(Client).where(Client.active.is_(True)).order_by(Client.id)
+    )
+    clients = result.scalars().all()
+    return [_client_to_dict(c) for c in clients]
 
 
-def get_clients() -> List[dict]:
-    """Return all clients from the clients sheet."""
-    try:
-        ws = get_or_create_worksheet(SHEET_CLIENTS)
-    except SheetsError as exc:
-        logger.error("Could not access clients sheet: %s", exc)
-        return []
+async def add_client(db: AsyncSession, client_name: str) -> dict:
+    """Create a new client row. Returns the created record."""
+    client_name = client_name.strip()
+    if not client_name:
+        raise ValueError("client_name cannot be empty")
 
-    _ensure_headers(ws)
-    header_map = get_header_map(ws)
-    if not header_map:
-        return []
-
-    all_rows = ws.get_all_values()
-    clients: List[dict] = []
-    for i, row in enumerate(all_rows):
-        if i == 0:
-            continue  # skip header
-        if not any(c.strip() for c in row):
-            continue
-        entry = _row_to_dict(header_map, row)
-        if entry.get("client_id") and entry.get("client_name"):
-            clients.append(entry)
-    return clients
+    client = Client(name=client_name, active=True)
+    db.add(client)
+    await db.flush()
+    await db.refresh(client)
+    logger.info("Created client id=%s name=%r", client.id, client_name)
+    return _client_to_dict(client)
 
 
-def add_client(client_name: str) -> dict:
-    """Append a new client to the clients sheet. Returns the created record."""
+async def update_client(
+    db: AsyncSession, client_id: str, client_name: str
+) -> Optional[dict]:
+    """Update the client name. Returns updated record or None if not found."""
     client_name = client_name.strip()
     if not client_name:
         raise ValueError("client_name cannot be empty")
 
     try:
-        ws = get_or_create_worksheet(SHEET_CLIENTS)
-    except SheetsError as exc:
-        raise SheetsError(f"Could not access clients sheet: {exc}") from exc
-
-    _ensure_headers(ws)
-    header_map = get_header_map(ws)
-
-    with _lock:
-        client_id = str(uuid.uuid4())
-        created_at = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-        row_data = {
-            "client_id": client_id,
-            "client_name": client_name,
-            "created_at": created_at,
-        }
-
-        max_idx = max(header_map.values(), default=len(CLIENTS_HEADERS) - 1)
-        row: List = [""] * (max_idx + 1)
-        for col_name, idx in header_map.items():
-            row[idx] = row_data.get(col_name, "")
-
-        ws.append_row(row, value_input_option="USER_ENTERED")
-
-    return row_data
-
-
-def update_client(client_id: str, client_name: str) -> Optional[dict]:
-    """Update the client_name for a given client_id. Returns updated record or None."""
-    client_name = client_name.strip()
-    if not client_name:
-        raise ValueError("client_name cannot be empty")
-
-    try:
-        ws = get_or_create_worksheet(SHEET_CLIENTS)
-    except SheetsError as exc:
-        raise SheetsError(f"Could not access clients sheet: {exc}") from exc
-
-    _ensure_headers(ws)
-    header_map = get_header_map(ws)
-    if not header_map:
+        cid = int(client_id)
+    except (ValueError, TypeError):
+        logger.warning("Invalid client_id value: %r", client_id)
         return None
 
-    all_rows = ws.get_all_values()
-    id_col = header_map.get("client_id")
-    name_col = header_map.get("client_name")
-    if id_col is None or name_col is None:
+    result = await db.execute(select(Client).where(Client.id == cid))
+    client = result.scalar_one_or_none()
+    if client is None:
         return None
 
-    for i, row in enumerate(all_rows):
-        if i == 0:
-            continue  # skip header
-        row_id = row[id_col] if id_col < len(row) else ""
-        if row_id == client_id:
-            # Update the name column (1-indexed row, 1-indexed col)
-            ws.update_cell(i + 1, name_col + 1, client_name)
-            return {"client_id": client_id, "client_name": client_name}
-
-    return None
+    client.name = client_name
+    await db.flush()
+    await db.refresh(client)
+    logger.info("Updated client id=%s new_name=%r", cid, client_name)
+    return _client_to_dict(client)
 
 
-def delete_client(client_id: str) -> bool:
-    """Delete a client by client_id. Returns True if deleted, False if not found."""
+async def delete_client(db: AsyncSession, client_id: str) -> bool:
+    """Soft-delete a client. Returns True if deleted, False if not found."""
     try:
-        ws = get_or_create_worksheet(SHEET_CLIENTS)
-    except SheetsError as exc:
-        raise SheetsError(f"Could not access clients sheet: {exc}") from exc
-
-    _ensure_headers(ws)
-    header_map = get_header_map(ws)
-    if not header_map:
+        cid = int(client_id)
+    except (ValueError, TypeError):
+        logger.warning("Invalid client_id value: %r", client_id)
         return False
 
-    all_rows = ws.get_all_values()
-    id_col = header_map.get("client_id")
-    if id_col is None:
+    result = await db.execute(select(Client).where(Client.id == cid))
+    client = result.scalar_one_or_none()
+    if client is None:
         return False
 
-    for i, row in enumerate(all_rows):
-        if i == 0:
-            continue  # skip header
-        row_id = row[id_col] if id_col < len(row) else ""
-        if row_id == client_id:
-            ws.delete_rows(i + 1)
-            return True
+    client.active = False
+    await db.flush()
+    logger.info("Soft-deleted client id=%s", cid)
+    return True
 
-    return False
