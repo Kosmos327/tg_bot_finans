@@ -1,7 +1,7 @@
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 
 from backend.models.settings import (
     SettingsResponse,
@@ -13,11 +13,41 @@ from backend.models.settings import (
     StatusItem,
 )
 from backend.services import settings_service
+from backend.services.journal_service import append_new_journal_entry
 from backend.services.sheets_service import SheetsError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["settings"])
+
+
+def _actor(init_data: Optional[str], role_header: Optional[str]) -> tuple:
+    """
+    Resolve the acting user from optional auth headers.
+
+    Returns a (user_id: str, role: str) tuple.
+    Falls back to ('system', 'admin') when no valid auth is provided,
+    so that settings mutations are always logged even without Telegram auth.
+    """
+    if init_data:
+        try:
+            from backend.services.telegram_auth import extract_user_from_init_data
+            user = extract_user_from_init_data(init_data)
+            if user:
+                user_id = str(user.get("id", ""))
+                from backend.services.permissions import ALLOWED_ROLES, NO_ACCESS_ROLE
+                role = settings_service.get_user_role(user_id) if user_id else NO_ACCESS_ROLE
+                return user_id, role
+        except Exception:
+            pass
+
+    if role_header and role_header.strip():
+        from backend.services.permissions import ALLOWED_ROLES
+        role = role_header.strip().lower()
+        if role in ALLOWED_ROLES:
+            return "", role
+
+    return "system", "admin"
 
 
 @router.get("/settings", response_model=SettingsResponse)
@@ -47,11 +77,25 @@ async def list_clients() -> List[Dict[str, Any]]:
 
 
 @router.post("/settings/clients", response_model=Dict[str, Any])
-async def create_client(body: ClientCreate) -> Dict[str, Any]:
+async def create_client(
+    body: ClientCreate,
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
     """Add a new client."""
     try:
         from backend.services.clients_service import add_client
-        return add_client(body.client_name)
+        result = add_client(body.client_name)
+        user_id, role = _actor(x_telegram_init_data, x_user_role)
+        append_new_journal_entry(
+            user=user_id,
+            role=role,
+            action="create_client",
+            entity="client",
+            entity_id=str(result.get("client_id", body.client_name)),
+            details=f"name={body.client_name}",
+        )
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SheetsError as exc:
@@ -60,7 +104,12 @@ async def create_client(body: ClientCreate) -> Dict[str, Any]:
 
 
 @router.put("/settings/clients/{client_id}", response_model=Dict[str, Any])
-async def update_client(client_id: str, body: ClientUpdate) -> Dict[str, Any]:
+async def update_client(
+    client_id: str,
+    body: ClientUpdate,
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
     """Update a client's name."""
     try:
         from backend.services.clients_service import update_client as svc_update
@@ -73,11 +122,25 @@ async def update_client(client_id: str, body: ClientUpdate) -> Dict[str, Any]:
 
     if result is None:
         raise HTTPException(status_code=404, detail="Client not found")
+
+    user_id, role = _actor(x_telegram_init_data, x_user_role)
+    append_new_journal_entry(
+        user=user_id,
+        role=role,
+        action="update_client",
+        entity="client",
+        entity_id=client_id,
+        details=f"new_name={body.client_name}",
+    )
     return result
 
 
 @router.delete("/settings/clients/{client_id}", response_model=Dict[str, Any])
-async def delete_client(client_id: str) -> Dict[str, Any]:
+async def delete_client(
+    client_id: str,
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
     """Delete a client by ID."""
     try:
         from backend.services.clients_service import delete_client as svc_delete
@@ -88,6 +151,16 @@ async def delete_client(client_id: str) -> Dict[str, Any]:
 
     if not deleted:
         raise HTTPException(status_code=404, detail="Client not found")
+
+    user_id, role = _actor(x_telegram_init_data, x_user_role)
+    append_new_journal_entry(
+        user=user_id,
+        role=role,
+        action="delete_client",
+        entity="client",
+        entity_id=client_id,
+        details="deleted",
+    )
     return {"success": True, "client_id": client_id}
 
 
@@ -107,11 +180,25 @@ async def list_managers() -> List[Dict[str, Any]]:
 
 
 @router.post("/settings/managers", response_model=Dict[str, Any])
-async def create_manager(body: ManagerCreate) -> Dict[str, Any]:
+async def create_manager(
+    body: ManagerCreate,
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
     """Add a new manager."""
     try:
         from backend.services.managers_service import add_manager
-        return add_manager(body.manager_name, body.role or "manager")
+        result = add_manager(body.manager_name, body.role or "manager")
+        user_id, role = _actor(x_telegram_init_data, x_user_role)
+        append_new_journal_entry(
+            user=user_id,
+            role=role,
+            action="create_manager",
+            entity="manager",
+            entity_id=str(result.get("manager_id", body.manager_name)),
+            details=f"name={body.manager_name} role={body.role or 'manager'}",
+        )
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SheetsError as exc:
@@ -120,7 +207,12 @@ async def create_manager(body: ManagerCreate) -> Dict[str, Any]:
 
 
 @router.put("/settings/managers/{manager_id}", response_model=Dict[str, Any])
-async def update_manager(manager_id: str, body: ManagerUpdate) -> Dict[str, Any]:
+async def update_manager(
+    manager_id: str,
+    body: ManagerUpdate,
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
     """Update a manager's name and/or role."""
     try:
         from backend.services.managers_service import update_manager as svc_update
@@ -133,11 +225,25 @@ async def update_manager(manager_id: str, body: ManagerUpdate) -> Dict[str, Any]
 
     if result is None:
         raise HTTPException(status_code=404, detail="Manager not found")
+
+    user_id, role = _actor(x_telegram_init_data, x_user_role)
+    append_new_journal_entry(
+        user=user_id,
+        role=role,
+        action="update_manager",
+        entity="manager",
+        entity_id=manager_id,
+        details=f"new_name={body.manager_name} new_role={body.role}",
+    )
     return result
 
 
 @router.delete("/settings/managers/{manager_id}", response_model=Dict[str, Any])
-async def delete_manager(manager_id: str) -> Dict[str, Any]:
+async def delete_manager(
+    manager_id: str,
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
     """Delete a manager by ID."""
     try:
         from backend.services.managers_service import delete_manager as svc_delete
@@ -148,6 +254,16 @@ async def delete_manager(manager_id: str) -> Dict[str, Any]:
 
     if not deleted:
         raise HTTPException(status_code=404, detail="Manager not found")
+
+    user_id, role = _actor(x_telegram_init_data, x_user_role)
+    append_new_journal_entry(
+        user=user_id,
+        role=role,
+        action="delete_manager",
+        entity="manager",
+        entity_id=manager_id,
+        details="deleted",
+    )
     return {"success": True, "manager_id": manager_id}
 
 

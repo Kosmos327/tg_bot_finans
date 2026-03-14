@@ -1344,34 +1344,42 @@ const ROLE_TABS = {
     { id: 'settings-tab', icon: '⚙️', label: 'Настройки' },
   ],
   operations_director: [
-    { id: 'tab-finances', icon: '💰', label: 'Финансы' },
-    { id: 'tab-billing',  icon: '🏭', label: 'Billing' },
-    { id: 'tab-expenses', icon: '📉', label: 'Расходы' },
-    { id: 'tab-reports',  icon: '📥', label: 'Отчёты' },
-    { id: 'tab-journal',  icon: '📜', label: 'Журнал' },
-    { id: 'settings-tab', icon: '⚙️', label: 'Настройки' },
+    { id: 'tab-finances',    icon: '💰', label: 'Финансы' },
+    { id: 'tab-dashboard',   icon: '🏠', label: 'Дашборд' },
+    { id: 'tab-receivables', icon: '💳', label: 'Долги' },
+    { id: 'tab-billing',     icon: '🏭', label: 'Billing' },
+    { id: 'tab-expenses',    icon: '📉', label: 'Расходы' },
+    { id: 'tab-reports',     icon: '📥', label: 'Отчёты' },
+    { id: 'tab-journal',     icon: '📜', label: 'Журнал' },
+    { id: 'settings-tab',    icon: '⚙️', label: 'Настройки' },
   ],
   accounting: [
-    { id: 'tab-finances', icon: '💰', label: 'Финансы' },
-    { id: 'tab-expenses', icon: '📉', label: 'Расходы' },
-    { id: 'tab-reports',  icon: '📥', label: 'Отчёты' },
-    { id: 'tab-journal',  icon: '📜', label: 'Журнал' },
-    { id: 'settings-tab', icon: '⚙️', label: 'Настройки' },
+    { id: 'tab-finances',    icon: '💰', label: 'Финансы' },
+    { id: 'tab-dashboard',   icon: '🏠', label: 'Дашборд' },
+    { id: 'tab-receivables', icon: '💳', label: 'Долги' },
+    { id: 'tab-expenses',    icon: '📉', label: 'Расходы' },
+    { id: 'tab-reports',     icon: '📥', label: 'Отчёты' },
+    { id: 'tab-journal',     icon: '📜', label: 'Журнал' },
+    { id: 'settings-tab',    icon: '⚙️', label: 'Настройки' },
   ],
   admin: [
-    { id: 'tab-finances', icon: '💰', label: 'Финансы' },
-    { id: 'tab-billing',  icon: '🏭', label: 'Billing' },
-    { id: 'tab-expenses', icon: '📉', label: 'Расходы' },
-    { id: 'tab-reports',  icon: '📥', label: 'Отчёты' },
-    { id: 'tab-journal',  icon: '📜', label: 'Журнал' },
-    { id: 'settings-tab', icon: '⚙️', label: 'Настройки' },
+    { id: 'tab-finances',    icon: '💰', label: 'Финансы' },
+    { id: 'tab-dashboard',   icon: '🏠', label: 'Дашборд' },
+    { id: 'tab-receivables', icon: '💳', label: 'Долги' },
+    { id: 'tab-billing',     icon: '🏭', label: 'Billing' },
+    { id: 'tab-expenses',    icon: '📉', label: 'Расходы' },
+    { id: 'tab-reports',     icon: '📥', label: 'Отчёты' },
+    { id: 'tab-journal',     icon: '📜', label: 'Журнал' },
+    { id: 'settings-tab',    icon: '⚙️', label: 'Настройки' },
   ],
   // Legacy roles
   accountant: [
-    { id: 'tab-finances', icon: '💰', label: 'Финансы' },
-    { id: 'tab-expenses', icon: '📉', label: 'Расходы' },
-    { id: 'tab-reports',  icon: '📥', label: 'Отчёты' },
-    { id: 'settings-tab', icon: '⚙️', label: 'Настройки' },
+    { id: 'tab-finances',    icon: '💰', label: 'Финансы' },
+    { id: 'tab-dashboard',   icon: '🏠', label: 'Дашборд' },
+    { id: 'tab-receivables', icon: '💳', label: 'Долги' },
+    { id: 'tab-expenses',    icon: '📉', label: 'Расходы' },
+    { id: 'tab-reports',     icon: '📥', label: 'Отчёты' },
+    { id: 'settings-tab',    icon: '⚙️', label: 'Настройки' },
   ],
   head_of_sales: [
     { id: 'tab-finances', icon: '💰', label: 'Финансы' },
@@ -1500,6 +1508,8 @@ async function enterApp(role) {
   initJournalHandlers();
   initSubnav();
   initSettingsManagement();
+  initDashboardHandlers();
+  initReceivablesHandlers();
 }
 
 function buildTabs(role) {
@@ -1545,6 +1555,12 @@ function switchMainTab(tabId) {
     if (typeof loadManagersSettings === 'function') loadManagersSettings();
     if (typeof loadDirectionsSettings === 'function') loadDirectionsSettings();
     if (typeof loadStatusesSettings === 'function') loadStatusesSettings();
+  }
+  if (tabId === 'tab-dashboard') {
+    loadOwnerDashboard();
+  }
+  if (tabId === 'tab-receivables') {
+    loadReceivables();
   }
   if (tabId === 'tab-finances' && !document.getElementById('my-deals-sub').style.display) {
     // show new deal sub by default
@@ -2373,5 +2389,196 @@ async function loadJournal() {
   } catch (err) {
     if (loadingEl) loadingEl.style.display = 'none';
     showToast(`Ошибка загрузки журнала: ${err.message}`, 'error');
+  }
+}
+
+// ==========================================
+// OWNER DASHBOARD
+// ==========================================
+function initDashboardHandlers() {
+  const loadBtn = document.getElementById('load-dashboard-btn');
+  if (loadBtn) loadBtn.addEventListener('click', loadOwnerDashboard);
+
+  const applyBtn = document.getElementById('apply-dashboard-filter-btn');
+  if (applyBtn) applyBtn.addEventListener('click', loadOwnerDashboard);
+}
+
+async function loadOwnerDashboard() {
+  const loadingEl = document.getElementById('dashboard-loading');
+  const contentEl = document.getElementById('dashboard-content');
+  const emptyEl   = document.getElementById('dashboard-empty');
+
+  if (loadingEl) loadingEl.style.display = 'flex';
+  if (contentEl) contentEl.style.display = 'none';
+  if (emptyEl)   emptyEl.style.display   = 'none';
+
+  try {
+    const month = document.getElementById('dashboard-month-filter')?.value || '';
+    const qs = month ? `?month=${encodeURIComponent(month)}` : '';
+    const role = localStorage.getItem('user_role') || '';
+    const data = await apiFetch(`/dashboard/owner${qs}`, {
+      headers: { 'X-User-Role': role },
+    });
+
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (!data) { if (emptyEl) emptyEl.style.display = 'flex'; return; }
+
+    // KPI cards
+    const kpisEl = document.getElementById('dashboard-kpis');
+    if (kpisEl) {
+      kpisEl.innerHTML = [
+        { label: 'Выручка с НДС',    value: formatCurrency(data.total_revenue_with_vat || 0),    icon: '💰' },
+        { label: 'Выручка без НДС',  value: formatCurrency(data.total_revenue_without_vat || 0), icon: '💵' },
+        { label: 'Расходы',          value: formatCurrency(data.total_expenses || 0),             icon: '📉' },
+        { label: 'Валовая прибыль',  value: formatCurrency(data.gross_profit || 0),               icon: '📈' },
+        { label: 'Долг',             value: formatCurrency(data.total_debt || 0),                 icon: '⚠️' },
+        { label: 'Оплачено (billing)',   value: String(data.paid_billing_count || 0),             icon: '✅' },
+        { label: 'Не оплачено (billing)', value: String(data.unpaid_billing_count || 0),          icon: '🔴' },
+      ].map(k => `
+        <div class="kpi-card">
+          <div class="kpi-icon">${k.icon}</div>
+          <div class="kpi-label">${escHtml(k.label)}</div>
+          <div class="kpi-value">${escHtml(k.value)}</div>
+        </div>
+      `).join('');
+    }
+
+    // Warehouse breakdown
+    const whEl = document.getElementById('dashboard-warehouse-list');
+    if (whEl && data.warehouse_breakdown) {
+      whEl.innerHTML = Object.entries(data.warehouse_breakdown).map(([wh, info]) => `
+        <div class="receivables-row">
+          <span class="receivables-label">${escHtml(wh)}</span>
+          <span class="receivables-amount">${formatCurrency(info.total_with_vat || 0)}</span>
+          <span class="receivables-meta">✅ ${info.paid_count || 0} / 🔴 ${info.unpaid_count || 0}</span>
+        </div>
+      `).join('');
+    }
+
+    // Top clients
+    const clientsEl = document.getElementById('dashboard-clients-list');
+    if (clientsEl && data.top_clients) {
+      clientsEl.innerHTML = data.top_clients.map((c, i) => `
+        <div class="receivables-row">
+          <span class="receivables-rank">#${i + 1}</span>
+          <span class="receivables-label">${escHtml(c.client || '—')}</span>
+          <span class="receivables-amount">${formatCurrency(c.revenue || 0)}</span>
+        </div>
+      `).join('');
+    }
+
+    if (contentEl) contentEl.style.display = 'block';
+  } catch (err) {
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (emptyEl)   emptyEl.style.display   = 'flex';
+    showToast(`Ошибка загрузки дашборда: ${err.message}`, 'error');
+  }
+}
+
+// ==========================================
+// RECEIVABLES / DEBT CONTROL
+// ==========================================
+function initReceivablesHandlers() {
+  const loadBtn = document.getElementById('load-receivables-btn');
+  if (loadBtn) loadBtn.addEventListener('click', loadReceivables);
+
+  const applyBtn = document.getElementById('apply-receivables-filter-btn');
+  if (applyBtn) applyBtn.addEventListener('click', loadReceivables);
+
+  // Report download buttons inside receivables tab
+  document.querySelectorAll('#tab-receivables [data-report]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      downloadReport(btn.dataset.report, btn.dataset.fmt);
+    });
+  });
+}
+
+async function loadReceivables() {
+  const loadingEl = document.getElementById('receivables-loading');
+  const contentEl = document.getElementById('receivables-content');
+  const emptyEl   = document.getElementById('receivables-empty');
+
+  if (loadingEl) loadingEl.style.display = 'flex';
+  if (contentEl) contentEl.style.display = 'none';
+  if (emptyEl)   emptyEl.style.display   = 'none';
+
+  try {
+    const month = document.getElementById('receivables-month-filter')?.value || '';
+    const qs = month ? `?month=${encodeURIComponent(month)}` : '';
+    const role = localStorage.getItem('user_role') || '';
+    const data = await apiFetch(`/receivables${qs}`, {
+      headers: { 'X-User-Role': role },
+    });
+
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (!data) { if (emptyEl) emptyEl.style.display = 'flex'; return; }
+
+    // Status KPIs
+    const statusEl = document.getElementById('receivables-status-kpis');
+    if (statusEl && data.status_summary) {
+      const s = data.status_summary;
+      statusEl.innerHTML = [
+        { label: 'Всего долг',       value: formatCurrency(data.total_debt || 0),  icon: '💳' },
+        { label: 'Оплачено',         value: String(s.paid || 0),                   icon: '✅' },
+        { label: 'Частично',         value: String(s.partial || 0),                icon: '⏳' },
+        { label: 'Не оплачено',      value: String(s.unpaid || 0),                 icon: '🔴' },
+        { label: 'Просрочено',       value: String(s.overdue || 0),                icon: '⚠️' },
+      ].map(k => `
+        <div class="kpi-card">
+          <div class="kpi-icon">${k.icon}</div>
+          <div class="kpi-label">${escHtml(k.label)}</div>
+          <div class="kpi-value">${escHtml(k.value)}</div>
+        </div>
+      `).join('');
+    }
+
+    // Debt by client
+    const clientEl = document.getElementById('receivables-by-client');
+    if (clientEl && data.debt_by_client) {
+      const entries = Object.entries(data.debt_by_client);
+      if (entries.length === 0) {
+        clientEl.innerHTML = '<p style="color:var(--color-text-secondary);font-size:13px;">Нет данных</p>';
+      } else {
+        clientEl.innerHTML = entries.map(([client, debt]) => `
+          <div class="receivables-row">
+            <span class="receivables-label">${escHtml(client)}</span>
+            <span class="receivables-amount" style="color:${debt > 0 ? 'var(--color-danger, #ef4444)' : 'var(--color-success, #22c55e)'}">${formatCurrency(debt)}</span>
+          </div>
+        `).join('');
+      }
+    }
+
+    // Debt by warehouse
+    const whEl = document.getElementById('receivables-by-warehouse');
+    if (whEl && data.debt_by_warehouse) {
+      whEl.innerHTML = Object.entries(data.debt_by_warehouse).map(([wh, debt]) => `
+        <div class="receivables-row">
+          <span class="receivables-label">${escHtml(wh)}</span>
+          <span class="receivables-amount">${formatCurrency(debt)}</span>
+        </div>
+      `).join('');
+    }
+
+    // Debt by month
+    const monthEl = document.getElementById('receivables-by-month');
+    if (monthEl && data.debt_by_month) {
+      const entries = Object.entries(data.debt_by_month);
+      if (entries.length === 0) {
+        monthEl.innerHTML = '<p style="color:var(--color-text-secondary);font-size:13px;">Нет данных</p>';
+      } else {
+        monthEl.innerHTML = entries.map(([m, debt]) => `
+          <div class="receivables-row">
+            <span class="receivables-label">${escHtml(m)}</span>
+            <span class="receivables-amount">${formatCurrency(debt)}</span>
+          </div>
+        `).join('');
+      }
+    }
+
+    if (contentEl) contentEl.style.display = 'block';
+  } catch (err) {
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (emptyEl)   emptyEl.style.display   = 'flex';
+    showToast(`Ошибка загрузки задолженности: ${err.message}`, 'error');
   }
 }

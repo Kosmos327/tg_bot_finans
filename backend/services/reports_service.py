@@ -338,3 +338,110 @@ def generate_billing_by_client_report(client: str, fmt: str = "csv") -> bytes:
                 result.append({"warehouse": wh_key, **e})
 
     return _serialise(result, fmt)
+
+
+# ---------------------------------------------------------------------------
+# Debt / receivables report generators
+# ---------------------------------------------------------------------------
+
+def _debt_entry(
+    wh_key: str, e: dict
+) -> dict:
+    """Return a flat debt record from a billing entry."""
+    client = (e.get("client") or e.get("client_name") or "").strip()
+    total_with_vat = _to_float(
+        e.get("total_with_vat") or e.get("p1_total_with_penalties")
+    )
+    payment_amount = _to_float(e.get("payment_amount") or e.get("paid_amount") or 0)
+    pay_status_raw = str(e.get("payment_status", "")).strip().lower()
+    paid_statuses = frozenset({"оплачено", "paid", "оплачен"})
+    if pay_status_raw in paid_statuses:
+        payment_amount = total_with_vat
+    debt = max(total_with_vat - payment_amount, 0.0)
+    return {
+        "warehouse": wh_key.upper(),
+        "client": client,
+        "period": e.get("period", ""),
+        "total_with_vat": total_with_vat,
+        "payment_amount": payment_amount,
+        "debt": debt,
+        "payment_status": e.get("payment_status", ""),
+    }
+
+
+def generate_debt_by_client_report(fmt: str = "csv") -> bytes:
+    """Return a debt summary grouped by client across all warehouses."""
+    from backend.services.sheets_service import BILLING_SHEETS
+    from backend.services.billing_service import get_billing_entries
+
+    client_debt: dict = {}
+    for wh_key in BILLING_SHEETS:
+        for e in get_billing_entries(wh_key):
+            rec = _debt_entry(wh_key, e)
+            c = rec["client"] or "Неизвестно"
+            if c not in client_debt:
+                client_debt[c] = {"client": c, "total_with_vat": 0.0, "payment_amount": 0.0, "debt": 0.0}
+            client_debt[c]["total_with_vat"] += rec["total_with_vat"]
+            client_debt[c]["payment_amount"] += rec["payment_amount"]
+            client_debt[c]["debt"] += rec["debt"]
+
+    rows = sorted(client_debt.values(), key=lambda x: -x["debt"])
+    return _serialise(rows, fmt)
+
+
+def generate_debt_by_warehouse_report(fmt: str = "csv") -> bytes:
+    """Return a debt summary grouped by warehouse."""
+    from backend.services.sheets_service import BILLING_SHEETS
+    from backend.services.billing_service import get_billing_entries
+
+    wh_debt: dict = {}
+    for wh_key in BILLING_SHEETS:
+        if wh_key.upper() not in wh_debt:
+            wh_debt[wh_key.upper()] = {"warehouse": wh_key.upper(), "total_with_vat": 0.0, "payment_amount": 0.0, "debt": 0.0}
+        for e in get_billing_entries(wh_key):
+            rec = _debt_entry(wh_key, e)
+            wh_debt[wh_key.upper()]["total_with_vat"] += rec["total_with_vat"]
+            wh_debt[wh_key.upper()]["payment_amount"] += rec["payment_amount"]
+            wh_debt[wh_key.upper()]["debt"] += rec["debt"]
+
+    return _serialise(list(wh_debt.values()), fmt)
+
+
+def generate_overdue_payments_report(fmt: str = "csv") -> bytes:
+    """Return billing entries that are overdue (unpaid/partial and past end_date)."""
+    from datetime import date as _date
+    from backend.services.sheets_service import BILLING_SHEETS
+    from backend.services.billing_service import get_billing_entries
+
+    today = _date.today()
+    result: List[dict] = []
+    for wh_key in BILLING_SHEETS:
+        for e in get_billing_entries(wh_key):
+            rec = _debt_entry(wh_key, e)
+            if rec["debt"] <= 0:
+                continue
+            end_date_str = str(e.get("end_date") or e.get("project_end_date") or "")
+            if end_date_str:
+                try:
+                    end = _date.fromisoformat(end_date_str[:10])
+                    if end < today:
+                        result.append({**rec, "end_date": end_date_str})
+                except (ValueError, TypeError):
+                    pass
+
+    return _serialise(result, fmt)
+
+
+def generate_partially_paid_billing_report(fmt: str = "csv") -> bytes:
+    """Return billing entries where payment_amount > 0 but debt > 0."""
+    from backend.services.sheets_service import BILLING_SHEETS
+    from backend.services.billing_service import get_billing_entries
+
+    result: List[dict] = []
+    for wh_key in BILLING_SHEETS:
+        for e in get_billing_entries(wh_key):
+            rec = _debt_entry(wh_key, e)
+            if rec["payment_amount"] > 0 and rec["debt"] > 0:
+                result.append(rec)
+
+    return _serialise(result, fmt)

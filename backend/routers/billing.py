@@ -222,6 +222,15 @@ async def upsert_billing(
             user=user_id or full_name or role,
             role=role,
         )
+        client_id = entry_dict.get("client") or entry_dict.get("client_name", "")
+        append_journal_entry(
+            telegram_user_id=user_id,
+            full_name=full_name,
+            user_role=role,
+            action="update_billing",
+            deal_id="",
+            payload_summary=f"warehouse={warehouse.lower()} client={client_id}",
+        )
         return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

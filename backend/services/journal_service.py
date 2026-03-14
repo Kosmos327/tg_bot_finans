@@ -14,6 +14,10 @@ append_journal_entry(
     telegram_user_id, full_name, user_role, action,
     deal_id="", changed_fields="", payload_summary=""
 ) → None
+
+append_new_journal_entry(
+    user, role, action, entity, entity_id="", details=""
+) → None
 """
 
 import json
@@ -25,6 +29,7 @@ from backend.services.sheets_service import (
     SheetsError,
     SheetNotFoundError,
     SHEET_JOURNAL,
+    SHEET_JOURNAL_NEW,
     get_worksheet,
     get_header_map,
     MissingHeaderError,
@@ -152,3 +157,77 @@ def append_journal_entry(
         )
     except Exception as exc:
         logger.warning("Failed to append journal entry: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# New journal format helpers
+# ---------------------------------------------------------------------------
+
+_NEW_JOURNAL_HEADERS: List[str] = [
+    "timestamp",
+    "user",
+    "role",
+    "action",
+    "entity",
+    "entity_id",
+    "details",
+]
+
+
+def append_new_journal_entry(
+    user: str,
+    role: str,
+    action: str,
+    entity: str,
+    entity_id: str = "",
+    details: str = "",
+) -> None:
+    """
+    Append one row to the new 'journal' sheet with the modern format.
+
+    Parameters
+    ----------
+    user:      User identifier (Telegram ID or name).
+    role:      Role at the time of the action.
+    action:    Short action name, e.g. "create_client", "download_report".
+    entity:    Entity type, e.g. "client", "manager", "deal", "expense".
+    entity_id: Affected entity ID or name.
+    details:   Human-readable summary of what changed.
+    """
+    try:
+        ws = get_worksheet(SHEET_JOURNAL_NEW)
+    except SheetNotFoundError as exc:
+        logger.warning("New journal sheet not found – entry not written: %s", exc)
+        return
+    except SheetsError as exc:
+        logger.error("Cannot access new journal sheet: %s", exc)
+        return
+
+    try:
+        existing = ws.row_values(1)
+        if not any(c.strip() for c in existing):
+            ws.append_row(_NEW_JOURNAL_HEADERS, value_input_option="USER_ENTERED")
+    except Exception:
+        pass
+
+    timestamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    row = [
+        timestamp,
+        user or "",
+        role or "",
+        action or "",
+        entity or "",
+        entity_id or "",
+        details or "",
+    ]
+    try:
+        ws.append_row(row, value_input_option="USER_ENTERED")
+        logger.debug(
+            "New journal entry written: action=%s entity=%s entity_id=%s user=%s",
+            action,
+            entity,
+            entity_id,
+            user,
+        )
+    except Exception as exc:
+        logger.warning("Failed to append new journal entry: %s", exc)

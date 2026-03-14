@@ -381,6 +381,75 @@
         </section>
       </div>
 
+      <!-- OWNER DASHBOARD TAB -->
+      <div id="tab-dashboard" class="tab-panel" style="display:none;">
+        <section class="card">
+          <div class="card-header">
+            <span class="section-icon">🏠</span><h2>Панель владельца</h2>
+            <button class="btn btn-sm btn-outline" id="load-dashboard-btn">🔄 Обновить</button>
+          </div>
+          <div class="field-group" style="flex-direction:row;gap:8px;align-items:center;flex-wrap:wrap;">
+            <label style="font-size:13px;color:var(--color-text-secondary);">Месяц:</label>
+            <input type="month" id="dashboard-month-filter" style="font-size:13px;padding:6px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface);" />
+            <button class="btn btn-sm btn-primary" id="apply-dashboard-filter-btn">Применить</button>
+          </div>
+          <div id="dashboard-loading" class="loading-state" style="display:none;"><div class="spinner spinner--lg"></div><p>Загрузка дашборда...</p></div>
+          <div id="dashboard-content" style="display:none;">
+            <div class="kpi-grid" id="dashboard-kpis"></div>
+            <div style="margin-top:12px;" id="dashboard-warehouse-section">
+              <div class="card-header" style="padding:0 0 8px 0;"><span class="section-icon">🏭</span><h3 style="font-size:14px;">По складам</h3></div>
+              <div id="dashboard-warehouse-list"></div>
+            </div>
+            <div style="margin-top:12px;" id="dashboard-clients-section">
+              <div class="card-header" style="padding:0 0 8px 0;"><span class="section-icon">👥</span><h3 style="font-size:14px;">Топ клиентов по выручке</h3></div>
+              <div id="dashboard-clients-list"></div>
+            </div>
+          </div>
+          <div id="dashboard-empty" class="empty-state" style="display:none;"><div class="empty-icon">📊</div><p>Данные недоступны</p></div>
+        </section>
+      </div>
+
+      <!-- RECEIVABLES TAB -->
+      <div id="tab-receivables" class="tab-panel" style="display:none;">
+        <section class="card">
+          <div class="card-header">
+            <span class="section-icon">💳</span><h2>Дебиторская задолженность</h2>
+            <button class="btn btn-sm btn-outline" id="load-receivables-btn">🔄 Обновить</button>
+          </div>
+          <div class="field-group" style="flex-direction:row;gap:8px;align-items:center;flex-wrap:wrap;">
+            <label style="font-size:13px;color:var(--color-text-secondary);">Месяц:</label>
+            <input type="month" id="receivables-month-filter" style="font-size:13px;padding:6px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface);" />
+            <button class="btn btn-sm btn-primary" id="apply-receivables-filter-btn">Применить</button>
+          </div>
+          <div id="receivables-loading" class="loading-state" style="display:none;"><div class="spinner spinner--lg"></div><p>Загрузка задолженности...</p></div>
+          <div id="receivables-content" style="display:none;">
+            <div class="kpi-grid" id="receivables-status-kpis"></div>
+            <div style="margin-top:12px;">
+              <div class="card-header" style="padding:0 0 8px 0;"><span class="section-icon">👥</span><h3 style="font-size:14px;">Долг по клиентам</h3></div>
+              <div id="receivables-by-client"></div>
+            </div>
+            <div style="margin-top:12px;">
+              <div class="card-header" style="padding:0 0 8px 0;"><span class="section-icon">🏭</span><h3 style="font-size:14px;">Долг по складам</h3></div>
+              <div id="receivables-by-warehouse"></div>
+            </div>
+            <div style="margin-top:12px;">
+              <div class="card-header" style="padding:0 0 8px 0;"><span class="section-icon">📅</span><h3 style="font-size:14px;">Долг по месяцам</h3></div>
+              <div id="receivables-by-month"></div>
+            </div>
+            <div style="margin-top:12px;" id="receivables-reports-section">
+              <div class="card-header" style="padding:0 0 8px 0;"><span class="section-icon">📥</span><h3 style="font-size:14px;">Отчёты по задолженности</h3></div>
+              <div class="reports-grid">
+                <div class="report-item"><div class="report-icon">👥</div><div class="report-info"><div class="report-title">Долг по клиентам</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="debt-by-client" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="debt-by-client" data-fmt="xlsx">XLSX</button></div></div>
+                <div class="report-item"><div class="report-icon">🏭</div><div class="report-info"><div class="report-title">Долг по складам</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="debt-by-warehouse" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="debt-by-warehouse" data-fmt="xlsx">XLSX</button></div></div>
+                <div class="report-item"><div class="report-icon">⚠️</div><div class="report-info"><div class="report-title">Просроченные платежи</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="overdue-payments" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="overdue-payments" data-fmt="xlsx">XLSX</button></div></div>
+                <div class="report-item"><div class="report-icon">⏳</div><div class="report-info"><div class="report-title">Частично оплаченный биллинг</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="partially-paid-billing" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="partially-paid-billing" data-fmt="xlsx">XLSX</button></div></div>
+              </div>
+            </div>
+          </div>
+          <div id="receivables-empty" class="empty-state" style="display:none;"><div class="empty-icon">💳</div><p>Задолженностей нет</p></div>
+        </section>
+      </div>
+
       <!-- SETTINGS TAB -->
       <div id="settings-tab" class="tab-panel" style="display:none;">
         <section class="card">
