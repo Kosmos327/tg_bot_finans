@@ -19,9 +19,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Validate required environment variables at startup
-validate_settings()
-
 # Whether to start Telegram bot polling alongside the API server.
 # Set RUN_BOT=true in the environment to enable polling.
 # When RUN_BOT=false (default), only the FastAPI server runs — useful
@@ -32,6 +29,10 @@ RUN_BOT: bool = os.getenv("RUN_BOT", "false").lower() == "true"
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Optionally start Telegram bot polling alongside FastAPI."""
+    # Validate required environment variables at startup (inside lifespan so
+    # module import does not fail during build/test when env vars are absent).
+    validate_settings()
+
     polling_task = None
     bot = None
 
