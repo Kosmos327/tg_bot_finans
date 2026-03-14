@@ -50,12 +50,23 @@ ROLE_LABELS_RU: Dict[str, str] = {
 # Password-based role auth (Mini App login)
 # ---------------------------------------------------------------------------
 
-ROLE_PASSWORDS: Dict[str, str] = {
-    "manager": "1",
-    "operations_director": "2",
-    "accounting": "3",
-    "admin": "12345",
-}
+def _load_role_passwords() -> Dict[str, str]:
+    """
+    Load role passwords from environment variables.
+
+    Variables: ROLE_PASSWORD_MANAGER, ROLE_PASSWORD_OPERATIONS_DIRECTOR,
+               ROLE_PASSWORD_ACCOUNTING, ROLE_PASSWORD_ADMIN
+
+    Falls back to empty string if a variable is not set (login will always fail
+    for that role unless the env var is configured).
+    """
+    import os
+    return {
+        "manager": os.getenv("ROLE_PASSWORD_MANAGER", ""),
+        "operations_director": os.getenv("ROLE_PASSWORD_OPERATIONS_DIRECTOR", ""),
+        "accounting": os.getenv("ROLE_PASSWORD_ACCOUNTING", ""),
+        "admin": os.getenv("ROLE_PASSWORD_ADMIN", ""),
+    }
 
 # ---------------------------------------------------------------------------
 # Feature-level access flags per role
@@ -198,7 +209,8 @@ def check_role(role: str, allowed_roles: FrozenSet[str]) -> bool:
 
 def verify_role_password(role: str, password: str) -> bool:
     """Return True if the given *password* matches the role's configured password."""
-    expected = ROLE_PASSWORDS.get(role)
-    if expected is None:
+    passwords = _load_role_passwords()
+    expected = passwords.get(role)
+    if not expected:
         return False
     return password == expected
