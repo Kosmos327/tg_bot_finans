@@ -1141,11 +1141,19 @@ function renderRefList(listId, emptyId, items, itemMapper) {
     const mapped = itemMapper(item);
     const row = document.createElement('div');
     row.className = 'ref-list-item';
-    row.innerHTML = `
-      <span class="ref-list-label">${escHtml(mapped.label)}</span>
-      <button class="btn btn-sm btn-danger ref-delete-btn" title="Удалить">🗑</button>
-    `;
-    row.querySelector('.ref-delete-btn').addEventListener('click', mapped.onDelete);
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'ref-list-label';
+    labelSpan.textContent = mapped.label;
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn btn-sm btn-danger ref-delete-btn';
+    deleteBtn.title = 'Удалить';
+    deleteBtn.textContent = '🗑';
+    deleteBtn.addEventListener('click', mapped.onDelete);
+
+    row.appendChild(labelSpan);
+    row.appendChild(deleteBtn);
     listEl.appendChild(row);
   });
 }

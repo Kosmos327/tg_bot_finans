@@ -91,7 +91,7 @@ def add_client(client_name: str) -> dict:
     header_map = get_header_map(ws)
 
     with _lock:
-        client_id = str(uuid.uuid4())[:8]
+        client_id = str(uuid.uuid4())
         created_at = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
         row_data = {

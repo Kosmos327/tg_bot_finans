@@ -91,7 +91,7 @@ def add_manager(manager_name: str, role: str = "manager") -> dict:
     header_map = get_header_map(ws)
 
     with _lock:
-        manager_id = str(uuid.uuid4())[:8]
+        manager_id = str(uuid.uuid4())
         created_at = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
         row_data = {
