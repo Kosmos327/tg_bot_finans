@@ -101,7 +101,7 @@ EXPENSE_CATEGORIES_L2: Dict[str, frozenset] = {
 }
 
 # Level 2 values that require a comment
-_COMMENT_REQUIRED_L2 = frozenset({"другое", "упаковочный материал"})
+COMMENT_REQUIRED_L2_CATEGORIES = frozenset({"другое", "упаковочный материал"})
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ def _validate_new_categories(
                 f"category_level_2 for '{cat1}' must be one of: "
                 + ", ".join(sorted(allowed_l2))
             )
-        if cat2_lower in _COMMENT_REQUIRED_L2 and not (comment and comment.strip()):
+        if cat2_lower in COMMENT_REQUIRED_L2_CATEGORIES and not (comment and comment.strip()):
             raise ValueError(
                 f"comment is required when category_level_2 is '{cat2}'"
             )

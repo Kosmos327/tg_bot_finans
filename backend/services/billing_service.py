@@ -199,12 +199,14 @@ def _calc_billing_totals_v2(row_dict: Dict[str, Any]) -> Dict[str, Any]:
     services = ["shipments", "storage", "returns_pickup", "additional_services"]
 
     if input_mode == INPUT_MODE_WITHOUT_VAT:
-        # Values are already without VAT; no VAT added
+        # Values are already without VAT; no VAT is added.
+        # We store the same value in both *_with_vat and *_without_vat fields
+        # so that downstream code reading *_without_vat gets the correct amount.
         for svc in services:
             without_vat = safe_float(row_dict.get(f"{svc}_with_vat", 0))
             row_dict[f"{svc}_without_vat"] = without_vat
             row_dict[f"{svc}_vat"] = 0.0
-            # Store original value in both columns for consistency
+            # Overwrite *_with_vat to equal *_without_vat (no VAT applied)
             row_dict[f"{svc}_with_vat"] = without_vat
     else:
         # Default: "с НДС" — values entered with VAT, split at 20%

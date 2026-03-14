@@ -17,6 +17,10 @@ const API_BASE = (function () {
   return window.location.origin;
 })();
 
+// Billing input mode constants (must match backend INPUT_MODE_* values)
+const BILLING_INPUT_MODE_WITH_VAT    = 'с НДС';
+const BILLING_INPUT_MODE_WITHOUT_VAT = 'без НДС';
+
 // ==========================================
 // TELEGRAM WEB APP INIT
 // ==========================================
@@ -1841,7 +1845,7 @@ async function saveBilling() {
     body = {
       client: clientName,
       period,
-      input_mode: fmt === 'new-no-vat' ? 'без НДС' : 'с НДС',
+      input_mode: fmt === 'new-no-vat' ? BILLING_INPUT_MODE_WITHOUT_VAT : BILLING_INPUT_MODE_WITH_VAT,
       shipments_with_vat:           pVal('bv2-shipments-with-vat'),
       units_count:                  pVal('bv2-units') != null ? parseInt(pVal('bv2-units')) : null,
       storage_with_vat:             pVal('bv2-storage-with-vat'),
@@ -2121,7 +2125,14 @@ async function saveBulkExpenses() {
     if (!cat1) { showToast(`Строка ${parseInt(idx)+1}: выберите категорию 1`, 'error'); return; }
     if (!amount) { showToast(`Строка ${parseInt(idx)+1}: укажите сумму`, 'error'); return; }
 
-    rows.push({ category_level_1: cat1, category_level_2: cat2 || undefined, comment: comment || undefined, amount_with_vat: amount, vat_rate: vatRate || undefined, deal_id: dealId || undefined });
+    rows.push({
+      category_level_1: cat1,
+      category_level_2: cat2 || undefined,
+      comment: comment || undefined,
+      amount_with_vat: amount,
+      vat_rate: vatRate || undefined,
+      deal_id: dealId || undefined,
+    });
   }
 
   if (rows.length === 0) { showToast('Нет строк для сохранения', 'error'); return; }

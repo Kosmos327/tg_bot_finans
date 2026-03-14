@@ -191,6 +191,12 @@ def generate_profit_report(fmt: str = "csv") -> bytes:
     return _serialise(data, fmt)
 
 
+# ---------------------------------------------------------------------------
+# Payment status constants (used by multiple report generators)
+# ---------------------------------------------------------------------------
+_PAID_STATUSES = frozenset({"оплачено", "paid", "оплачен"})
+
+
 def generate_warehouse_revenue_report(fmt: str = "csv") -> bytes:
     """
     Return aggregated revenue (with VAT, without VAT, VAT amount) per warehouse
@@ -237,7 +243,7 @@ def generate_paid_deals_report(fmt: str = "csv") -> bytes:
         status = str(d.get("payment_status", "")).strip().lower()
         paid_amount = _to_float(d.get("paid_amount") or d.get("paid") or 0)
         revenue = _to_float(d.get("revenue_with_vat") or d.get("charged_with_vat") or 0)
-        if status in ("оплачено", "paid") or (revenue > 0 and paid_amount >= revenue):
+        if status in _PAID_STATUSES or (revenue > 0 and paid_amount >= revenue):
             paid.append(d)
 
     return _serialise(paid, fmt)
@@ -257,7 +263,7 @@ def generate_unpaid_deals_report(fmt: str = "csv") -> bytes:
         status = str(d.get("payment_status", "")).strip().lower()
         paid_amount = _to_float(d.get("paid_amount") or d.get("paid") or 0)
         revenue = _to_float(d.get("revenue_with_vat") or d.get("charged_with_vat") or 0)
-        if status not in ("оплачено", "paid") and not (revenue > 0 and paid_amount >= revenue):
+        if status not in _PAID_STATUSES and not (revenue > 0 and paid_amount >= revenue):
             unpaid.append(d)
 
     return _serialise(unpaid, fmt)
@@ -272,7 +278,7 @@ def generate_paid_billing_report(fmt: str = "csv") -> bytes:
     for wh_key in BILLING_SHEETS:
         for e in get_billing_entries(wh_key):
             status = str(e.get("payment_status", "")).strip().lower()
-            if status in ("оплачено", "paid", "оплачен"):
+            if status in _PAID_STATUSES:
                 paid.append({"warehouse": wh_key, **e})
 
     return _serialise(paid, fmt)
@@ -287,7 +293,7 @@ def generate_unpaid_billing_report(fmt: str = "csv") -> bytes:
     for wh_key in BILLING_SHEETS:
         for e in get_billing_entries(wh_key):
             status = str(e.get("payment_status", "")).strip().lower()
-            if status not in ("оплачено", "paid", "оплачен"):
+            if status not in _PAID_STATUSES:
                 unpaid.append({"warehouse": wh_key, **e})
 
     return _serialise(unpaid, fmt)
