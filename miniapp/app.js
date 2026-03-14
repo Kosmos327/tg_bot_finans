@@ -78,6 +78,11 @@ async function apiFetch(path, options = {}) {
   if (initData) {
     headers['X-Telegram-Init-Data'] = initData;
   }
+  // Attach telegram_id for app_users-based auth (primary resolution path)
+  if (!headers['X-Telegram-Id']) {
+    const telegramId = telegramUser?.id || localStorage.getItem('telegram_id');
+    if (telegramId) headers['X-Telegram-Id'] = String(telegramId);
+  }
   // Attach stored role for password-auth users
   if (!headers['X-User-Role']) {
     const savedRole = localStorage.getItem('user_role');
@@ -1313,6 +1318,17 @@ async function init() {
 
   // Check auth before showing any content
   const savedRole = localStorage.getItem('user_role');
+
+  // If running inside Telegram and user has a saved role but no telegram_id stored,
+  // the app_users record may not exist yet (old login flow). Force re-authentication
+  // so that /auth/miniapp-login is called and the record is created.
+  if (savedRole && telegramUser && !localStorage.getItem('telegram_id')) {
+    localStorage.removeItem('user_role');
+    localStorage.removeItem('user_role_label');
+    showAuthScreen();
+    return;
+  }
+
   if (savedRole) {
     await enterApp(savedRole);
   } else {
@@ -1442,16 +1458,39 @@ function initAuthHandlers() {
     if (errEl) errEl.style.display = 'none';
 
     try {
-      const result = await apiFetch('/auth/role-login', {
-        method: 'POST',
-        body: JSON.stringify({ role: selectedRole, password }),
-      });
+      let role, roleLabel;
 
-      if (result.success) {
-        localStorage.setItem('user_role', result.role);
-        localStorage.setItem('user_role_label', result.role_label);
-        await enterApp(result.role);
+      if (telegramUser) {
+        // Primary path: call /auth/miniapp-login to create/update app_users record
+        const fullName = [telegramUser.first_name, telegramUser.last_name]
+          .filter(Boolean).join(' ');
+        const result = await apiFetch('/auth/miniapp-login', {
+          method: 'POST',
+          body: JSON.stringify({
+            telegram_id: telegramUser.id,
+            full_name: fullName,
+            username: telegramUser.username || null,
+            selected_role: selectedRole,
+            password,
+          }),
+        });
+        role = result.role;
+        roleLabel = ROLE_LABELS[role] || role;
+        localStorage.setItem('telegram_id', String(telegramUser.id));
+      } else {
+        // Fallback path: no Telegram context (e.g. dev/testing environment)
+        const result = await apiFetch('/auth/role-login', {
+          method: 'POST',
+          body: JSON.stringify({ role: selectedRole, password }),
+        });
+        if (!result.success) throw new Error(result.error || result.message || 'Login failed');
+        role = result.role;
+        roleLabel = result.role_label;
       }
+
+      localStorage.setItem('user_role', role);
+      localStorage.setItem('user_role_label', roleLabel);
+      await enterApp(role);
     } catch (err) {
       if (errEl) {
         errEl.textContent = 'Неверный пароль. Попробуйте ещё раз.';
@@ -1493,6 +1532,7 @@ async function enterApp(role) {
   if (logoutBtn) logoutBtn.addEventListener('click', () => {
     localStorage.removeItem('user_role');
     localStorage.removeItem('user_role_label');
+    localStorage.removeItem('telegram_id');
     location.reload();
   });
 
