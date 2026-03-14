@@ -102,18 +102,28 @@ class BillingEntryCreateV2(BaseModel):
 
     VAT-derived fields (shipments_vat, shipments_without_vat, etc.) and totals
     (total_without_vat, total_vat, total_with_vat) are calculated automatically
-    by the backend using a fixed 20% VAT rate.
+    by the backend.
+
+    input_mode controls VAT handling:
+      "с НДС"   – entered values are WITH VAT; auto-calc VAT and without_vat (default)
+      "без НДС" – entered values are WITHOUT VAT; vat=0, total_with_vat=total_without_vat
+      "old"     – use old p1/p2 format via BillingEntryCreate instead
     """
     client: str
     period: Optional[str] = None
+    input_mode: Optional[str] = None  # "с НДС" | "без НДС"
 
     shipments_with_vat: Optional[float] = None
+    units_count: Optional[int] = None
     storage_with_vat: Optional[float] = None
+    pallets_count: Optional[int] = None
     returns_pickup_with_vat: Optional[float] = None
     returns_trips_count: Optional[int] = None
     additional_services_with_vat: Optional[float] = None
     penalties: Optional[float] = None
     payment_status: Optional[str] = None
+    payment_amount: Optional[float] = None
+    payment_date: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +134,12 @@ EXPENSE_TYPES = frozenset({"variable", "production", "logistics", "returns", "ex
 
 
 class ExpenseCreate(BaseModel):
-    # New field names (take priority)
+    # New 2-level category fields (take priority over old category/expense_type)
+    category_level_1: Optional[str] = None
+    category_level_2: Optional[str] = None
+    comment: Optional[str] = None
+
+    # New field names (take priority over legacy)
     category: Optional[str] = None
     amount_with_vat: Optional[float] = None
     vat_rate: Optional[float] = None
@@ -148,6 +163,11 @@ class ExpenseCreate(BaseModel):
                 f"category/expense_type must be one of: {', '.join(sorted(EXPENSE_TYPES))}"
             )
         return v_str
+
+
+class ExpenseBulkCreate(BaseModel):
+    """Bulk expense creation – submit multiple expense rows in one request."""
+    rows: List["ExpenseCreate"]
 
 
 class ExpenseResponse(BaseModel):

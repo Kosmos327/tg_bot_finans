@@ -95,12 +95,15 @@ _SUM_FIELDS_P2 = [
 BILLING_HEADERS_V2: List[str] = [
     "client",
     "period",
+    "input_mode",
     "shipments_with_vat",
     "shipments_vat",
     "shipments_without_vat",
+    "units_count",
     "storage_with_vat",
     "storage_vat",
     "storage_without_vat",
+    "pallets_count",
     "returns_pickup_with_vat",
     "returns_pickup_vat",
     "returns_pickup_without_vat",
@@ -113,6 +116,8 @@ BILLING_HEADERS_V2: List[str] = [
     "total_vat",
     "total_with_vat",
     "payment_status",
+    "payment_amount",
+    "payment_date",
 ]
 
 # Calculated columns in new format (re-computed from input)
@@ -123,6 +128,10 @@ _CALC_FIELDS_V2 = frozenset({
     "additional_services_vat", "additional_services_without_vat",
     "total_without_vat", "total_vat", "total_with_vat",
 })
+
+# Input-mode constants
+INPUT_MODE_WITH_VAT = "с НДС"
+INPUT_MODE_WITHOUT_VAT = "без НДС"
 
 # ---------------------------------------------------------------------------
 # Format detection
@@ -173,11 +182,11 @@ BILLING_VAT_RATE = 0.20
 
 def _calc_billing_totals_v2(row_dict: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Calculate new-format billing totals with fixed 20% VAT breakdown.
+    Calculate new-format billing totals.
 
-    For each service category (shipments, storage, returns_pickup, additional_services):
-      without_vat = with_vat / (1 + BILLING_VAT_RATE)
-      vat         = with_vat - without_vat
+    input_mode controls VAT handling:
+      "с НДС" (default) – entered values are WITH VAT; auto-calc VAT breakdown (20% rate)
+      "без НДС"          – entered values are WITHOUT VAT; vat=0, total_with_vat=total_without_vat
 
     Totals (per problem spec):
       total_without_vat = sum(without_vat for all services) - penalties
@@ -186,14 +195,27 @@ def _calc_billing_totals_v2(row_dict: Dict[str, Any]) -> Dict[str, Any]:
 
     Returns the same dict (modified in-place).
     """
+    input_mode = str(row_dict.get("input_mode") or INPUT_MODE_WITH_VAT).strip()
     services = ["shipments", "storage", "returns_pickup", "additional_services"]
 
-    for svc in services:
-        with_vat = safe_float(row_dict.get(f"{svc}_with_vat", 0))
-        without_vat = round(with_vat / (1 + BILLING_VAT_RATE), 2)
-        vat_amount = round(with_vat - without_vat, 2)
-        row_dict[f"{svc}_without_vat"] = without_vat
-        row_dict[f"{svc}_vat"] = vat_amount
+    if input_mode == INPUT_MODE_WITHOUT_VAT:
+        # Values are already without VAT; no VAT is added.
+        # We store the same value in both *_with_vat and *_without_vat fields
+        # so that downstream code reading *_without_vat gets the correct amount.
+        for svc in services:
+            without_vat = safe_float(row_dict.get(f"{svc}_with_vat", 0))
+            row_dict[f"{svc}_without_vat"] = without_vat
+            row_dict[f"{svc}_vat"] = 0.0
+            # Overwrite *_with_vat to equal *_without_vat (no VAT applied)
+            row_dict[f"{svc}_with_vat"] = without_vat
+    else:
+        # Default: "с НДС" — values entered with VAT, split at 20%
+        for svc in services:
+            with_vat = safe_float(row_dict.get(f"{svc}_with_vat", 0))
+            without_vat = round(with_vat / (1 + BILLING_VAT_RATE), 2)
+            vat_amount = round(with_vat - without_vat, 2)
+            row_dict[f"{svc}_without_vat"] = without_vat
+            row_dict[f"{svc}_vat"] = vat_amount
 
     penalties = safe_float(row_dict.get("penalties", 0))
 
@@ -255,26 +277,91 @@ def _get_client_key(header_map: Dict[str, int]) -> str:
     return "client" if "client" in header_map else "client_name"
 
 
-def _find_client_row(ws, client_name: str, header_map: Dict[str, int]) -> Optional[int]:
+def _find_row_by_client_period(
+    ws, client_name: str, period: str, header_map: Dict[str, int]
+) -> Optional[int]:
     """
-    Return the 1-based row index for the row whose client column matches.
+    Return the 1-based row index for the row whose client+period columns match.
+    Falls back to client-only match if period column is absent.
     Returns None if not found.
     """
     client_col_idx = _get_client_col(header_map)
     if client_col_idx is None:
         return None
-    col_values = ws.col_values(client_col_idx + 1)  # gspread is 1-based
-    for i, val in enumerate(col_values):
+
+    period_col_idx = header_map.get("period")
+
+    all_rows = ws.get_all_values()
+    for i, row in enumerate(all_rows):
         if i == 0:
             continue  # skip header
-        if val.strip() == client_name.strip():
-            return i + 1  # 1-based row
+        row_client = row[client_col_idx].strip() if client_col_idx < len(row) else ""
+        if row_client != client_name.strip():
+            continue
+        if period and period_col_idx is not None:
+            row_period = row[period_col_idx].strip() if period_col_idx < len(row) else ""
+            if row_period != period.strip():
+                continue
+        return i + 1  # 1-based row
     return None
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+def search_billing_entry(
+    warehouse: str,
+    client: str,
+    month: Optional[str] = None,
+    period: Optional[str] = None,
+) -> Optional[dict]:
+    """
+    Find a billing entry by warehouse + client + optional month + optional period.
+
+    month:  YYYY-MM  (e.g. "2024-01")
+    period: "p1", "p2", or None for full-month entries
+
+    For new-format sheets, the period column is matched as:
+      - If period given: "{month}-{period}" (e.g. "2024-01-p1")
+      - If only month given: exact match on period column OR period starts with month
+
+    For old-format sheets, only client matching is performed (p1/p2 live as column groups).
+
+    Returns the matching row dict or None if not found.
+    """
+    entries = get_billing_entries(warehouse)
+    if not entries:
+        return None
+
+    new_fmt = "client" in (entries[0] if entries else {})
+    client_key = "client" if new_fmt else "client_name"
+
+    for entry in entries:
+        entry_client = entry.get(client_key, "").strip()
+        if entry_client.lower() != client.strip().lower():
+            continue
+
+        if not new_fmt:
+            # Old format: just match by client
+            return entry
+
+        # New format: optionally filter by period
+        if month:
+            entry_period = entry.get("period", "").strip()
+            if period:
+                # Full match: e.g. "2024-01-p1"
+                expected = f"{month}-{period}"
+                if entry_period != expected:
+                    continue
+            else:
+                # Only month: accept "2024-01", "2024-01-p1", "2024-01-p2"
+                if entry_period != month and not entry_period.startswith(f"{month}-"):
+                    continue
+
+        return entry
+
+    return None
 
 def get_billing_entries(warehouse: str) -> List[dict]:
     """Return all billing rows for the given warehouse."""
@@ -377,7 +464,11 @@ def upsert_billing_entry(
         _calc_totals(cleaned)
 
     with _lock:
-        row_num = _find_client_row(ws, client_name, header_map)
+        period_val = str(entry_data.get("period") or "").strip()
+        if new_fmt and period_val:
+            row_num = _find_row_by_client_period(ws, client_name, period_val, header_map)
+        else:
+            row_num = _find_row_by_client_period(ws, client_name, "", header_map)
         row_data = _dict_to_row(header_map, cleaned)
 
         if row_num is None:

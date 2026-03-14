@@ -61,6 +61,7 @@
         <div class="subnav" id="finances-subnav">
           <button class="subnav-btn active" data-sub="new-deal-sub">🆕 Новая сделка</button>
           <button class="subnav-btn" data-sub="my-deals-sub">📂 Мои сделки</button>
+          <button class="subnav-btn" data-sub="edit-deal-sub">✏️ Редактировать</button>
         </div>
         <div id="new-deal-sub">
           <form id="deal-form" novalidate>
@@ -159,46 +160,81 @@
           <div id="deals-empty" class="empty-state" style="display:none;"><div class="empty-icon">📭</div><h3>Сделок пока нет</h3><p>Создайте первую сделку</p></div>
           <div id="deals-list" class="deals-list"></div>
         </div>
+
+        <!-- EDIT DEAL SUB-PANEL -->
+        <div id="edit-deal-sub" style="display:none;">
+          <section class="card">
+            <div class="card-header"><span class="section-icon">✏️</span><h2>Редактировать сделку</h2>
+              <button class="btn btn-sm btn-outline" id="edit-deal-back-btn">← Назад</button>
+            </div>
+            <div class="field-group">
+              <div class="field"><label for="edit-deal-select">Выберите сделку <span class="required">*</span></label>
+                <div class="select-wrapper"><select id="edit-deal-select"><option value="">Выберите...</option></select></div>
+              </div>
+              <div id="edit-deal-form-body" style="display:none;">
+                <div class="field"><label for="edit-status">Статус</label><div class="select-wrapper"><select id="edit-status"></select></div></div>
+                <div class="field"><label for="edit-variable-expense-1-with-vat">Перем. расход 1 с НДС, ₽</label><div class="input-wrapper"><input type="number" id="edit-variable-expense-1-with-vat" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
+                <div class="field"><label for="edit-variable-expense-2-with-vat">Перем. расход 2 с НДС, ₽</label><div class="input-wrapper"><input type="number" id="edit-variable-expense-2-with-vat" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
+                <div class="field"><label for="edit-production-expense-with-vat">Произв. расход с НДС, ₽</label><div class="input-wrapper"><input type="number" id="edit-production-expense-with-vat" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
+                <div class="field"><label for="edit-general-production-expense">Общепроизв. расход, ₽</label><div class="input-wrapper"><input type="number" id="edit-general-production-expense" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
+                <div class="field"><label for="edit-manager-bonus-pct">Бонус менеджера, %</label><div class="input-wrapper"><input type="number" id="edit-manager-bonus-pct" placeholder="0" min="0" max="100" step="0.1" /><span class="input-suffix">%</span></div></div>
+                <div class="field"><label for="edit-comment">Комментарий</label><input type="text" id="edit-comment" placeholder="Добавьте комментарий..." /></div>
+              </div>
+            </div>
+            <div class="form-actions" id="edit-deal-save-actions" style="display:none;">
+              <button class="btn btn-primary" id="edit-deal-save-btn">💾 Сохранить изменения</button>
+            </div>
+          </section>
+        </div>
       </div>
 
       <!-- BILLING TAB -->
       <div id="tab-billing" class="tab-panel" style="display:none;">
         <section class="card">
-          <div class="card-header"><span class="section-icon">🏭</span><h2>Billing — управление счетами</h2></div>
+          <div class="card-header"><span class="section-icon">🔍</span><h2>Фильтры</h2></div>
           <div class="field-group">
             <div class="field"><label for="billing-warehouse">Склад</label><div class="select-wrapper"><select id="billing-warehouse"><option value="msk">MSK — Москва</option><option value="nsk">NSK — Новосибирск</option><option value="ekb">EKB — Екатеринбург</option></select></div></div>
-            <div class="field"><label for="billing-client">Клиент</label><input type="text" id="billing-client" placeholder="Название клиента..." /></div>
-            <div class="field"><label for="billing-period">Период (напр. 2024-01)</label><input type="month" id="billing-period" /></div>
-            <div class="field"><label>Формат ввода</label><div class="select-wrapper"><select id="billing-format"><option value="new">Новый (с НДС)</option><option value="old">Старый (периоды p1/p2)</option></select></div></div>
+            <div class="field"><label for="billing-client-select">Клиент <span class="required">*</span></label><div class="select-wrapper"><select id="billing-client-select"><option value="">Выберите клиента...</option></select></div></div>
+            <div class="field-row">
+              <div class="field"><label for="billing-month">Месяц</label><input type="month" id="billing-month" /></div>
+              <div class="field"><label for="billing-half">Период</label><div class="select-wrapper"><select id="billing-half"><option value="">Полный месяц</option><option value="p1">p1 — 1–15</option><option value="p2">p2 — 16–конец</option></select></div></div>
+            </div>
+            <div class="field"><label>Режим ввода</label><div class="select-wrapper"><select id="billing-format"><option value="new">Новый (с НДС)</option><option value="new-no-vat">Новый (без НДС)</option><option value="old">Старый (периоды p1/p2)</option></select></div></div>
           </div>
+          <div class="form-actions">
+            <button class="btn btn-outline" id="billing-load-btn">🔄 Загрузить данные</button>
+          </div>
+          <div id="billing-search-status" style="display:none;font-size:13px;margin-top:8px;color:var(--color-text-secondary);"></div>
         </section>
 
-        <!-- NEW FORMAT SECTION -->
+        <!-- NEW FORMAT SECTION (with VAT) -->
         <div id="billing-section-new">
         <section class="card">
           <div class="card-header"><span class="section-icon">🚚</span><h2>Отгрузки</h2></div>
           <div class="field-group">
             <div class="field-row">
-              <div class="field"><label for="bv2-shipments-with-vat">Отгрузки с НДС, ₽</label><input type="number" id="bv2-shipments-with-vat" placeholder="0" min="0" step="0.01" /></div>
-              <div class="field"><label>Без НДС:</label><strong id="bv2-shipments-no-vat-calc">0.00 ₽</strong></div>
+              <div class="field"><label for="bv2-shipments-with-vat" id="bv2-shipments-label">Отгрузки с НДС, ₽</label><input type="number" id="bv2-shipments-with-vat" placeholder="0" min="0" step="0.01" /></div>
+              <div class="field"><label id="bv2-shipments-calc-label">Без НДС:</label><strong id="bv2-shipments-no-vat-calc">0.00 ₽</strong></div>
             </div>
+            <div class="field"><label for="bv2-units">Кол-во единиц</label><input type="number" id="bv2-units" placeholder="0" min="0" /></div>
           </div>
         </section>
         <section class="card">
           <div class="card-header"><span class="section-icon">📦</span><h2>Хранение</h2></div>
           <div class="field-group">
             <div class="field-row">
-              <div class="field"><label for="bv2-storage-with-vat">Хранение с НДС, ₽</label><input type="number" id="bv2-storage-with-vat" placeholder="0" min="0" step="0.01" /></div>
-              <div class="field"><label>Без НДС:</label><strong id="bv2-storage-no-vat-calc">0.00 ₽</strong></div>
+              <div class="field"><label for="bv2-storage-with-vat" id="bv2-storage-label">Хранение с НДС, ₽</label><input type="number" id="bv2-storage-with-vat" placeholder="0" min="0" step="0.01" /></div>
+              <div class="field"><label id="bv2-storage-calc-label">Без НДС:</label><strong id="bv2-storage-no-vat-calc">0.00 ₽</strong></div>
             </div>
+            <div class="field"><label for="bv2-pallets">Паллет</label><input type="number" id="bv2-pallets" placeholder="0" min="0" /></div>
           </div>
         </section>
         <section class="card">
           <div class="card-header"><span class="section-icon">↩️</span><h2>Возвраты</h2></div>
           <div class="field-group">
             <div class="field-row">
-              <div class="field"><label for="bv2-returns-pickup-with-vat">Забор возвратов с НДС, ₽</label><input type="number" id="bv2-returns-pickup-with-vat" placeholder="0" min="0" step="0.01" /></div>
-              <div class="field"><label>Без НДС:</label><strong id="bv2-returns-pickup-no-vat-calc">0.00 ₽</strong></div>
+              <div class="field"><label for="bv2-returns-pickup-with-vat" id="bv2-returns-label">Забор возвратов с НДС, ₽</label><input type="number" id="bv2-returns-pickup-with-vat" placeholder="0" min="0" step="0.01" /></div>
+              <div class="field"><label id="bv2-returns-calc-label">Без НДС:</label><strong id="bv2-returns-pickup-no-vat-calc">0.00 ₽</strong></div>
             </div>
             <div class="field"><label for="bv2-returns-trips">Кол-во рейсов</label><input type="number" id="bv2-returns-trips" placeholder="0" min="0" /></div>
           </div>
@@ -207,27 +243,34 @@
           <div class="card-header"><span class="section-icon">➕</span><h2>Доп. услуги и штрафы</h2></div>
           <div class="field-group">
             <div class="field-row">
-              <div class="field"><label for="bv2-additional-with-vat">Доп. услуги с НДС, ₽</label><input type="number" id="bv2-additional-with-vat" placeholder="0" min="0" step="0.01" /></div>
-              <div class="field"><label>Без НДС:</label><strong id="bv2-additional-no-vat-calc">0.00 ₽</strong></div>
+              <div class="field"><label for="bv2-additional-with-vat" id="bv2-additional-label">Доп. услуги с НДС, ₽</label><input type="number" id="bv2-additional-with-vat" placeholder="0" min="0" step="0.01" /></div>
+              <div class="field"><label id="bv2-additional-calc-label">Без НДС:</label><strong id="bv2-additional-no-vat-calc">0.00 ₽</strong></div>
             </div>
             <div class="field"><label for="bv2-penalties">Штрафы, ₽</label><input type="number" id="bv2-penalties" placeholder="0" min="0" step="0.01" /></div>
           </div>
         </section>
         <section class="card">
-          <div class="card-header"><span class="section-icon">📊</span><h2>Итого (новый формат)</h2></div>
+          <div class="card-header"><span class="section-icon">📊</span><h2>Итого</h2></div>
           <div class="billing-totals">
             <div class="total-row"><span>Итого без НДС:</span><strong id="bv2-total-no-vat">0.00 ₽</strong></div>
-            <div class="total-row"><span>Итого НДС:</span><strong id="bv2-total-vat">0.00 ₽</strong></div>
+            <div class="total-row" id="bv2-vat-row"><span>Итого НДС:</span><strong id="bv2-total-vat">0.00 ₽</strong></div>
             <div class="total-row"><span>Итого с НДС:</span><strong id="bv2-total-with-vat">0.00 ₽</strong></div>
           </div>
-          <div class="field" style="margin-top:12px;"><label for="bv2-payment-status">Статус оплаты</label><div class="select-wrapper"><select id="bv2-payment-status"><option value="">Не указан</option><option value="paid">Оплачено</option><option value="partial">Частично</option><option value="pending">Ожидает</option></select></div></div>
+          <div class="field" style="margin-top:12px;">
+            <label for="bv2-payment-status">Статус оплаты</label>
+            <div class="select-wrapper"><select id="bv2-payment-status"><option value="">Не указан</option><option value="оплачено">Оплачено</option><option value="частично">Частично</option><option value="ожидает">Ожидает</option></select></div>
+          </div>
+          <div class="field-row" style="margin-top:8px;">
+            <div class="field"><label for="bv2-payment-amount">Сумма оплаты, ₽</label><input type="number" id="bv2-payment-amount" placeholder="0.00" min="0" step="0.01" /></div>
+            <div class="field"><label for="bv2-payment-date">Дата оплаты</label><input type="date" id="bv2-payment-date" /></div>
+          </div>
         </section>
         </div>
 
         <!-- OLD FORMAT SECTIONS (p1/p2) -->
         <div id="billing-section-old" style="display:none;">
         <section class="card">
-          <div class="card-header"><span class="section-icon">📅</span><h2>Период 1</h2></div>
+          <div class="card-header"><span class="section-icon">📅</span><h2>Период 1 (1–15)</h2></div>
           <div class="field-group">
             <div class="field-row"><div class="field"><label for="p1-shipments">Сумма отгрузок, ₽</label><input type="number" id="p1-shipments" placeholder="0" min="0" step="0.01" /></div><div class="field"><label for="p1-units">Кол-во единиц</label><input type="number" id="p1-units" placeholder="0" min="0" /></div></div>
             <div class="field-row"><div class="field"><label for="p1-storage">Сумма хранения, ₽</label><input type="number" id="p1-storage" placeholder="0" min="0" step="0.01" /></div><div class="field"><label for="p1-pallets">Паллет</label><input type="number" id="p1-pallets" placeholder="0" min="0" /></div></div>
@@ -237,7 +280,7 @@
           </div>
         </section>
         <section class="card">
-          <div class="card-header"><span class="section-icon">📅</span><h2>Период 2</h2></div>
+          <div class="card-header"><span class="section-icon">📅</span><h2>Период 2 (16–конец)</h2></div>
           <div class="field-group">
             <div class="field-row"><div class="field"><label for="p2-shipments">Сумма отгрузок, ₽</label><input type="number" id="p2-shipments" placeholder="0" min="0" step="0.01" /></div><div class="field"><label for="p2-units">Кол-во единиц</label><input type="number" id="p2-units" placeholder="0" min="0" /></div></div>
             <div class="field-row"><div class="field"><label for="p2-storage">Сумма хранения, ₽</label><input type="number" id="p2-storage" placeholder="0" min="0" step="0.01" /></div><div class="field"><label for="p2-pallets">Паллет</label><input type="number" id="p2-pallets" placeholder="0" min="0" /></div></div>
@@ -249,7 +292,7 @@
         </div>
         <div class="form-actions"><button class="btn btn-primary" id="billing-save-btn">💾 Сохранить billing</button></div>
         <section class="card">
-          <div class="card-header"><span class="section-icon">💳</span><h2>Отметить оплату</h2></div>
+          <div class="card-header"><span class="section-icon">💳</span><h2>Отметить оплату по сделке</h2></div>
           <div class="field-group">
             <div class="field"><label for="payment-deal-id">ID сделки</label><input type="text" id="payment-deal-id" placeholder="Введите ID сделки..." /></div>
             <div class="field"><label for="payment-amount">Сумма оплаты, ₽</label><div class="input-wrapper"><input type="number" id="payment-amount" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
@@ -260,11 +303,28 @@
 
       <!-- EXPENSES TAB -->
       <div id="tab-expenses" class="tab-panel" style="display:none;">
+        <!-- Single expense entry -->
         <section class="card">
           <div class="card-header"><span class="section-icon">📉</span><h2>Добавить расход</h2></div>
           <div class="field-group">
             <div class="field"><label for="expense-deal-id">ID сделки (необязательно)</label><input type="text" id="expense-deal-id" placeholder="Введите ID сделки..." /></div>
-            <div class="field"><label for="expense-type">Тип расхода <span class="required">*</span></label><div class="select-wrapper"><select id="expense-type"><option value="">Выберите тип...</option><option value="variable">Переменный</option><option value="production">Производственный</option><option value="logistics">Логистика</option><option value="returns">Возвраты</option><option value="extra">Дополнительный</option></select></div></div>
+            <div class="field"><label for="expense-cat1">Категория 1 <span class="required">*</span></label>
+              <div class="select-wrapper"><select id="expense-cat1">
+                <option value="">Выберите категорию...</option>
+                <option value="логистика">Логистика</option>
+                <option value="наёмный персонал">Наёмный персонал</option>
+                <option value="расходники">Расходники</option>
+                <option value="другое">Другое</option>
+              </select></div>
+            </div>
+            <div class="field" id="expense-cat2-field" style="display:none;">
+              <label for="expense-cat2">Категория 2</label>
+              <div class="select-wrapper"><select id="expense-cat2"><option value="">Выберите...</option></select></div>
+            </div>
+            <div class="field" id="expense-comment-field" style="display:none;">
+              <label for="expense-comment">Комментарий <span class="required" id="expense-comment-required" style="display:none;">*</span></label>
+              <input type="text" id="expense-comment" placeholder="Введите комментарий..." />
+            </div>
             <div class="field"><label for="expense-amount">Сумма с НДС, ₽ <span class="required">*</span></label><div class="input-wrapper"><input type="number" id="expense-amount" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
             <div class="field"><label for="expense-vat-rate">Ставка НДС (напр. 0.20 для 20%)</label><div class="input-wrapper"><input type="number" id="expense-vat-rate" placeholder="0.20" min="0" max="1" step="0.01" /><span class="input-suffix">доля</span></div></div>
             <div class="field"><label for="expense-vat">НДС сумма, ₽ (или введите ставку выше)</label><div class="input-wrapper"><input type="number" id="expense-vat" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
@@ -275,6 +335,14 @@
           </div>
           <div class="form-actions"><button class="btn btn-primary" id="expense-save-btn">💾 Добавить расход</button></div>
         </section>
+
+        <!-- Bulk entry mode -->
+        <section class="card">
+          <div class="card-header"><span class="section-icon">📋</span><h2>Пакетный ввод расходов</h2><button class="btn btn-sm btn-outline" id="bulk-add-row-btn">+ Строка</button></div>
+          <div id="bulk-rows-container"></div>
+          <div class="form-actions" id="bulk-save-row" style="display:none;"><button class="btn btn-primary" id="bulk-save-btn">💾 Сохранить все строки</button></div>
+        </section>
+
         <section class="card">
           <div class="card-header"><span class="section-icon">📋</span><h2>Список расходов</h2><button class="btn btn-sm btn-outline" id="load-expenses-btn">🔄 Загрузить</button></div>
           <div id="expenses-loading" class="loading-state" style="display:none;"><div class="spinner spinner--lg"></div><p>Загрузка...</p></div>
@@ -293,6 +361,12 @@
             <div class="report-item"><div class="report-icon">📉</div><div class="report-info"><div class="report-title">Отчёт по расходам</div><div class="report-desc">Все расходы с НДС</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="expenses" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="expenses" data-fmt="xlsx">XLSX</button></div></div>
             <div class="report-item"><div class="report-icon">📈</div><div class="report-info"><div class="report-title">Отчёт по прибыли</div><div class="report-desc">Валовая прибыль, НДС, маржа</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="profit" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="profit" data-fmt="xlsx">XLSX</button></div></div>
             <div class="report-item"><div class="report-icon">🏪</div><div class="report-info"><div class="report-title">Выручка складов</div><div class="report-desc">Итого с НДС / без НДС / НДС</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="warehouse-revenue" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="warehouse-revenue" data-fmt="xlsx">XLSX</button></div></div>
+            <div class="report-item"><div class="report-icon">✅</div><div class="report-info"><div class="report-title">Оплаченные сделки</div><div class="report-desc">Fully paid deals</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="paid-deals" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="paid-deals" data-fmt="xlsx">XLSX</button></div></div>
+            <div class="report-item"><div class="report-icon">⏳</div><div class="report-info"><div class="report-title">Неоплаченные сделки</div><div class="report-desc">Unpaid/partial deals</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="unpaid-deals" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="unpaid-deals" data-fmt="xlsx">XLSX</button></div></div>
+            <div class="report-item"><div class="report-icon">💚</div><div class="report-info"><div class="report-title">Оплаченный биллинг</div><div class="report-desc">Billing со статусом "Оплачено"</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="paid-billing" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="paid-billing" data-fmt="xlsx">XLSX</button></div></div>
+            <div class="report-item"><div class="report-icon">🔴</div><div class="report-info"><div class="report-title">Неоплаченный биллинг</div><div class="report-desc">Billing без статуса оплаты</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="unpaid-billing" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="unpaid-billing" data-fmt="xlsx">XLSX</button></div></div>
+            <div class="report-item"><div class="report-icon">📅</div><div class="report-info"><div class="report-title">Биллинг по месяцу</div><div class="report-desc">Фильтр по месяцу YYYY-MM</div></div><div class="report-actions"><input type="month" id="report-month" style="font-size:12px;padding:4px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface);" /><button class="btn btn-sm btn-outline" data-report="billing-by-month" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="billing-by-month" data-fmt="xlsx">XLSX</button></div></div>
+            <div class="report-item"><div class="report-icon">🏷️</div><div class="report-info"><div class="report-title">Биллинг по клиенту</div><div class="report-desc">Все склады для клиента</div></div><div class="report-actions"><input type="text" id="report-client-filter" placeholder="Клиент..." style="font-size:12px;padding:4px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface);width:100px;" /><button class="btn btn-sm btn-outline" data-report="billing-by-client" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="billing-by-client" data-fmt="xlsx">XLSX</button></div></div>
           </div>
         </section>
       </div>

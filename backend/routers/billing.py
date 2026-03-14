@@ -3,6 +3,7 @@ billing.py – Billing management endpoints.
 
 Routes
 ------
+GET  /billing/search                       – filter-based billing lookup
 GET  /billing/{warehouse}                  – list all billing entries for warehouse
 GET  /billing/{warehouse}/{client_name}    – get one entry
 POST /billing/{warehouse}                  – create or update a billing entry
@@ -19,6 +20,7 @@ from backend.services import settings_service
 from backend.services.billing_service import (
     get_billing_entries,
     get_billing_entry,
+    search_billing_entry,
     upsert_billing_entry,
 )
 from backend.services.deals_service import update_deal, get_deal_by_id
@@ -66,6 +68,48 @@ def _resolve_user(init_data: Optional[str], role_header: Optional[str] = None) -
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@router.get("/search", response_model=Dict[str, Any])
+async def search_billing(
+    warehouse: str = Query(...),
+    client: str = Query(...),
+    month: Optional[str] = Query(default=None, description="YYYY-MM"),
+    period: Optional[str] = Query(default=None, description="p1, p2, or empty for full month"),
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """
+    Filter-based billing lookup.
+
+    Returns the existing billing entry if found, or {"found": false} if not.
+    Users can then preload the form with returned data or start a fresh entry.
+    """
+    if warehouse.lower() not in _ALLOWED_WAREHOUSES:
+        raise HTTPException(status_code=400, detail=f"Unknown warehouse: {warehouse}")
+
+    user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
+    if role == NO_ACCESS_ROLE:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not (check_role(role, BILLING_EDIT_ROLES) or check_role(role, FINANCE_VIEW_ROLES)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        entry = search_billing_entry(
+            warehouse=warehouse.lower(),
+            client=client,
+            month=month or None,
+            period=period or None,
+        )
+    except (SheetsError, ValueError) as exc:
+        logger.error("Error searching billing: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if entry is None:
+        return {"found": False}
+
+    return {"found": True, **entry}
+
 
 @router.get("/{warehouse}", response_model=List[Dict[str, Any]])
 async def list_billing(

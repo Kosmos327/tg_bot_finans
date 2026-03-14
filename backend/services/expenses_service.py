@@ -61,6 +61,9 @@ EXPENSES_HEADERS: List[str] = [
 EXPENSES_HEADERS_V2: List[str] = [
     "expense_id",
     "date",
+    "category_level_1",
+    "category_level_2",
+    "comment",
     "category",
     "amount_with_vat",
     "vat_rate",
@@ -78,6 +81,27 @@ EXPENSES_HEADERS_V2: List[str] = [
 VALID_EXPENSE_TYPES = frozenset(
     {"variable", "production", "logistics", "returns", "extra"}
 )
+
+# ---------------------------------------------------------------------------
+# New 2-level category hierarchy
+# ---------------------------------------------------------------------------
+
+EXPENSE_CATEGORIES_L1 = frozenset({
+    "логистика",
+    "наёмный персонал",
+    "расходники",
+    "другое",
+})
+
+EXPENSE_CATEGORIES_L2: Dict[str, frozenset] = {
+    "логистика": frozenset({"забор возвратов", "отвоз fbo", "отвоз fbs", "другое"}),
+    "наёмный персонал": frozenset({"погрузочно-разгрузочные работы", "упаковка товара", "другое"}),
+    "расходники": frozenset({"упаковочный материал", "паллеты", "короба", "пломбы"}),
+    "другое": frozenset(),  # free-form, comment required
+}
+
+# Level 2 values that require a comment
+COMMENT_REQUIRED_L2_CATEGORIES = frozenset({"другое", "упаковочный материал"})
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +159,37 @@ def _calculate_expense_vat(amount_with_vat: float, vat_rate: float) -> tuple:
 # Public API
 # ---------------------------------------------------------------------------
 
+def _validate_new_categories(
+    cat1: str, cat2: Optional[str], comment: Optional[str]
+) -> None:
+    """Validate the 2-level category combo and comment requirements."""
+    cat1_lower = cat1.strip().lower()
+    if cat1_lower not in EXPENSE_CATEGORIES_L1:
+        raise ValueError(
+            f"category/expense_type must be one of: {', '.join(sorted(EXPENSE_CATEGORIES_L1))}"
+        )
+
+    if cat1_lower == "другое" and not (comment and comment.strip()):
+        raise ValueError("comment is required when category_level_1 is 'Другое'")
+
+    if cat2:
+        cat2_lower = cat2.strip().lower()
+        allowed_l2 = EXPENSE_CATEGORIES_L2.get(cat1_lower, frozenset())
+        if allowed_l2 and cat2_lower not in allowed_l2:
+            raise ValueError(
+                f"category_level_2 for '{cat1}' must be one of: "
+                + ", ".join(sorted(allowed_l2))
+            )
+        if cat2_lower in COMMENT_REQUIRED_L2_CATEGORIES and not (comment and comment.strip()):
+            raise ValueError(
+                f"comment is required when category_level_2 is '{cat2}'"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
 def add_expense(
     data: Dict[str, Any],
     user: str = "",
@@ -143,18 +198,31 @@ def add_expense(
     """
     Append one expense row to the 'expenses' sheet.
 
-    Accepts both old-style keys (amount, vat, expense_type) and new-style keys
-    (amount_with_vat, vat_rate, category).  New-style keys take precedence.
+    Accepts:
+    - New 2-level category system: category_level_1, category_level_2, comment
+    - New single-level: category, amount_with_vat, vat_rate
+    - Legacy keys: expense_type, amount, vat
 
     Auto-generates expense_id and created_at.
     Returns the written row as a dict.
     """
-    # Resolve category / expense_type (new name takes priority)
-    category = str(data.get("category") or data.get("expense_type", "")).strip().lower()
-    if category not in VALID_EXPENSE_TYPES:
-        raise ValueError(
-            f"category/expense_type must be one of: {', '.join(sorted(VALID_EXPENSE_TYPES))}"
-        )
+    cat_level_1 = str(data.get("category_level_1") or "").strip()
+    cat_level_2 = str(data.get("category_level_2") or "").strip()
+    comment = str(data.get("comment") or "").strip()
+
+    if cat_level_1:
+        # New 2-level category system
+        _validate_new_categories(cat_level_1, cat_level_2 or None, comment or None)
+        # Map to legacy category field for backward compat
+        cat1_lower = cat_level_1.lower()
+        category = cat1_lower
+    else:
+        # Old single-level category system
+        category = str(data.get("category") or data.get("expense_type", "")).strip().lower()
+        if category not in VALID_EXPENSE_TYPES:
+            raise ValueError(
+                f"category/expense_type must be one of: {', '.join(sorted(VALID_EXPENSE_TYPES))}"
+            )
 
     # Resolve amount: new 'amount_with_vat' takes priority over old 'amount'
     amount_with_vat = safe_float(data.get("amount_with_vat") or data.get("amount") or 0)
@@ -191,6 +259,9 @@ def add_expense(
         row_data: Dict[str, Any] = {
             "expense_id": expense_id,
             "date": date_str,
+            "category_level_1": cat_level_1,
+            "category_level_2": cat_level_2,
+            "comment": comment,
             "category": category,
             "amount_with_vat": str(amount_with_vat),
             "vat_rate": str(vat_rate),
@@ -217,6 +288,9 @@ def add_expense(
     result = {
         "expense_id": expense_id,
         "date": date_str,
+        "category_level_1": cat_level_1,
+        "category_level_2": cat_level_2,
+        "comment": comment,
         "category": category,
         "amount_with_vat": amount_with_vat,
         "vat_rate": vat_rate,
@@ -237,10 +311,33 @@ def add_expense(
         user_role=role,
         action="add_expense",
         deal_id=deal_id,
-        payload_summary=f"category={category} amount_with_vat={amount_with_vat} vat_rate={vat_rate}",
+        payload_summary=f"cat1={cat_level_1 or category} cat2={cat_level_2} "
+                        f"amount_with_vat={amount_with_vat} vat_rate={vat_rate}",
     )
 
     return result
+
+
+def add_expenses_bulk(
+    rows: List[Dict[str, Any]],
+    user: str = "",
+    role: str = "",
+) -> List[dict]:
+    """
+    Add multiple expense rows in a single call.
+
+    Each row is processed by add_expense. Rows are committed sequentially.
+    Returns the list of written rows.
+    Raises ValueError on the first invalid row (with the row index in the message).
+    """
+    results: List[dict] = []
+    for i, row_data in enumerate(rows):
+        try:
+            result = add_expense(data=row_data, user=user, role=role)
+            results.append(result)
+        except ValueError as exc:
+            raise ValueError(f"Row {i}: {exc}") from exc
+    return results
 
 
 def get_expenses(

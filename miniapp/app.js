@@ -17,6 +17,10 @@ const API_BASE = (function () {
   return window.location.origin;
 })();
 
+// Billing input mode constants (must match backend INPUT_MODE_* values)
+const BILLING_INPUT_MODE_WITH_VAT    = 'с НДС';
+const BILLING_INPUT_MODE_WITHOUT_VAT = 'без НДС';
+
 // ==========================================
 // TELEGRAM WEB APP INIT
 // ==========================================
@@ -189,6 +193,12 @@ function populateSelects(data) {
   fillSelect('manager', data.managers || []);
   fillSelect('vat_type', data.vat_types || []);
   fillSelect('source', data.sources || []);
+
+  // Billing client dropdown
+  fillSelect('billing-client-select', data.clients || []);
+
+  // Edit deal status dropdown
+  fillSelect('edit-status', data.statuses || []);
 
   // Filters
   fillSelect('filter-status', data.statuses || [], true);
@@ -598,6 +608,138 @@ function clearDealsList() {
   const listEl = document.getElementById('deals-list');
   if (listEl) listEl.innerHTML = '';
   showDealsEmpty(false);
+}
+
+// ==========================================
+// DEAL EDITING
+// ==========================================
+function initDealEdit() {
+  const dealSelect = document.getElementById('edit-deal-select');
+  if (dealSelect) {
+    dealSelect.addEventListener('change', () => onEditDealSelected(dealSelect.value));
+  }
+
+  const saveBtn = document.getElementById('edit-deal-save-btn');
+  if (saveBtn) saveBtn.addEventListener('click', saveEditedDeal);
+
+  const backBtn = document.getElementById('edit-deal-back-btn');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      switchSubnav('my-deals-sub');
+    });
+  }
+}
+
+async function loadDealsForEdit() {
+  const dealSelect = document.getElementById('edit-deal-select');
+  if (!dealSelect) return;
+
+  try {
+    const role = localStorage.getItem('user_role') || '';
+    const deals = await apiFetch('/deal/user', { headers: { 'X-User-Role': role } });
+    dealSelect.innerHTML = '<option value="">Выберите сделку...</option>';
+    deals.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d.deal_id;
+      opt.textContent = `${d.deal_id} — ${d.client || ''}${d.status ? ' [' + d.status + ']' : ''}`;
+      dealSelect.appendChild(opt);
+    });
+  } catch (err) {
+    showToast(`Ошибка загрузки сделок: ${err.message}`, 'error');
+  }
+}
+
+async function onEditDealSelected(dealId) {
+  const formBody = document.getElementById('edit-deal-form-body');
+  const saveActions = document.getElementById('edit-deal-save-actions');
+  if (!dealId) {
+    if (formBody) formBody.style.display = 'none';
+    if (saveActions) saveActions.style.display = 'none';
+    return;
+  }
+
+  try {
+    const role = localStorage.getItem('user_role') || '';
+    const deal = await apiFetch(`/deal/${dealId}`, { headers: { 'X-User-Role': role } });
+
+    const setVal = (id, val) => {
+      const el = document.getElementById(id);
+      if (el && val !== null && val !== undefined && val !== '') el.value = val;
+    };
+
+    setVal('edit-status', deal.status);
+    setVal('edit-variable-expense-1-with-vat', deal.variable_expense_1_with_vat);
+    setVal('edit-variable-expense-2-with-vat', deal.variable_expense_2_with_vat);
+    setVal('edit-production-expense-with-vat', deal.production_expense_with_vat);
+    setVal('edit-general-production-expense', deal.general_production_expense);
+    setVal('edit-manager-bonus-pct', deal.manager_bonus_pct);
+    setVal('edit-comment', deal.comment);
+
+    if (formBody) formBody.style.display = 'block';
+    if (saveActions) saveActions.style.display = 'block';
+  } catch (err) {
+    showToast(`Ошибка загрузки сделки: ${err.message}`, 'error');
+  }
+}
+
+async function saveEditedDeal() {
+  const dealId = document.getElementById('edit-deal-select')?.value;
+  if (!dealId) { showToast('Выберите сделку', 'error'); return; }
+
+  const pFloat = (id) => {
+    const v = document.getElementById(id)?.value;
+    return v ? parseFloat(v) : null;
+  };
+
+  const payload = {};
+  const statusEl = document.getElementById('edit-status');
+  if (statusEl?.value) payload.status = statusEl.value;
+
+  const v1 = pFloat('edit-variable-expense-1-with-vat');
+  if (v1 != null) payload.variable_expense_1_with_vat = v1;
+
+  const v2 = pFloat('edit-variable-expense-2-with-vat');
+  if (v2 != null) payload.variable_expense_2_with_vat = v2;
+
+  const pe = pFloat('edit-production-expense-with-vat');
+  if (pe != null) payload.production_expense_with_vat = pe;
+
+  const gpe = pFloat('edit-general-production-expense');
+  if (gpe != null) payload.general_production_expense = gpe;
+
+  const bonusPct = pFloat('edit-manager-bonus-pct');
+  if (bonusPct != null) payload.manager_bonus_pct = bonusPct;
+
+  const commentEl = document.getElementById('edit-comment');
+  if (commentEl?.value?.trim()) payload.comment = commentEl.value.trim();
+
+  if (Object.keys(payload).length === 0) {
+    showToast('Нет изменений для сохранения', 'warning');
+    return;
+  }
+
+  try {
+    const role = localStorage.getItem('user_role') || '';
+    await apiFetch(`/deal/update/${dealId}`, {
+      method: 'PATCH',
+      headers: { 'X-User-Role': role },
+      body: JSON.stringify(payload),
+    });
+    showToast(`Сделка ${dealId} обновлена!`, 'success');
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+function switchSubnav(subId) {
+  const parent = document.getElementById('tab-finances');
+  if (!parent) return;
+  parent.querySelectorAll('.subnav-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.sub === subId);
+  });
+  parent.querySelectorAll('[id$="-sub"]').forEach(panel => {
+    panel.style.display = panel.id === subId ? 'block' : 'none';
+  });
 }
 
 // ==========================================
@@ -1352,6 +1494,7 @@ async function enterApp(role) {
   // Init new feature handlers
   initBillingForm();
   initExpensesForm();
+  initDealEdit();
   initReportsHandlers();
   initJournalHandlers();
   initSubnav();
@@ -1426,13 +1569,16 @@ function initSubnav() {
       btn.classList.add('active');
 
       // Show/hide sub-panels
-      ['new-deal-sub', 'my-deals-sub'].forEach(id => {
+      ['new-deal-sub', 'my-deals-sub', 'edit-deal-sub'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = id === subId ? 'block' : 'none';
       });
 
       if (subId === 'my-deals-sub' && state.deals.length === 0) {
         loadDeals();
+      }
+      if (subId === 'edit-deal-sub') {
+        loadDealsForEdit();
       }
     });
   });
@@ -1467,7 +1613,9 @@ function calcBillingTotals(prefix) {
 
 function calcBillingTotalsV2() {
   const pVal = (id) => parseFloat(document.getElementById(id)?.value || 0) || 0;
-  const BILLING_VAT_RATE = 0.20; // fixed 20% VAT for billing
+  const fmt = document.getElementById('billing-format')?.value || 'new';
+  const noVatMode = (fmt === 'new-no-vat');
+  const BILLING_VAT_RATE = 0.20;
 
   const services = [
     { id: 'bv2-shipments-with-vat',      calcId: 'bv2-shipments-no-vat-calc' },
@@ -1480,22 +1628,50 @@ function calcBillingTotalsV2() {
   let totalVat = 0;
 
   for (const svc of services) {
-    const withVat = pVal(svc.id);
-    const noVat = withVat / (1 + BILLING_VAT_RATE);
-    const vatA = withVat - noVat;
+    const entered = pVal(svc.id);
+    let noVat, vatA;
+    if (noVatMode) {
+      noVat = entered;
+      vatA = 0;
+    } else {
+      noVat = entered / (1 + BILLING_VAT_RATE);
+      vatA = entered - noVat;
+    }
     totalNoVat += noVat;
     totalVat += vatA;
     setEl(svc.calcId, `${noVat.toFixed(2)} ₽`);
   }
 
   const penalties = pVal('bv2-penalties');
-  // Penalties reduce only the pre-VAT total (per spec: total_without_vat = sum(without_vat) - penalties)
   totalNoVat = totalNoVat - penalties;
-  const totalWithVat = totalNoVat + totalVat;
+  const totalWithVat = noVatMode ? totalNoVat : totalNoVat + totalVat;
 
   setEl('bv2-total-no-vat', `${totalNoVat.toFixed(2)} ₽`);
   setEl('bv2-total-vat', `${totalVat.toFixed(2)} ₽`);
   setEl('bv2-total-with-vat', `${totalWithVat.toFixed(2)} ₽`);
+}
+
+function updateBillingInputLabels() {
+  const fmt = document.getElementById('billing-format')?.value || 'new';
+  const noVatMode = (fmt === 'new-no-vat');
+  const vatRow = document.getElementById('bv2-vat-row');
+
+  const labelMap = {
+    'bv2-shipments-label': noVatMode ? 'Отгрузки (без НДС), ₽' : 'Отгрузки с НДС, ₽',
+    'bv2-storage-label':   noVatMode ? 'Хранение (без НДС), ₽' : 'Хранение с НДС, ₽',
+    'bv2-returns-label':   noVatMode ? 'Забор возвратов (без НДС), ₽' : 'Забор возвратов с НДС, ₽',
+    'bv2-additional-label': noVatMode ? 'Доп. услуги (без НДС), ₽' : 'Доп. услуги с НДС, ₽',
+  };
+  for (const [id, text] of Object.entries(labelMap)) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+  const calcLabelText = noVatMode ? '(итого без НДС)' : 'Без НДС:';
+  ['bv2-shipments-calc-label','bv2-storage-calc-label','bv2-returns-calc-label','bv2-additional-calc-label'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = calcLabelText;
+  });
+  if (vatRow) vatRow.style.display = noVatMode ? 'none' : '';
 }
 
 function switchBillingFormat(fmt) {
@@ -1503,13 +1679,12 @@ function switchBillingFormat(fmt) {
   const oldSection = document.getElementById('billing-section-old');
   if (!newSection || !oldSection) return;
 
-  if (fmt === 'new') {
-    newSection.style.display = 'block';
-    oldSection.style.display = 'none';
-  } else {
-    newSection.style.display = 'none';
-    oldSection.style.display = 'block';
-  }
+  const showNew = (fmt === 'new' || fmt === 'new-no-vat');
+  newSection.style.display = showNew ? 'block' : 'none';
+  oldSection.style.display = showNew ? 'none' : 'block';
+
+  updateBillingInputLabels();
+  calcBillingTotalsV2();
 }
 
 function initBillingForm() {
@@ -1539,6 +1714,10 @@ function initBillingForm() {
     if (el) el.addEventListener('input', calcBillingTotalsV2);
   });
 
+  // Load existing billing when filters are all set
+  const loadBtn = document.getElementById('billing-load-btn');
+  if (loadBtn) loadBtn.addEventListener('click', loadBillingEntry);
+
   // Save billing
   const saveBtn = document.getElementById('billing-save-btn');
   if (saveBtn) saveBtn.addEventListener('click', saveBilling);
@@ -1548,15 +1727,112 @@ function initBillingForm() {
   if (markBtn) markBtn.addEventListener('click', markPayment);
 }
 
+async function loadBillingEntry() {
+  const warehouse = document.getElementById('billing-warehouse')?.value;
+  const client = document.getElementById('billing-client-select')?.value?.trim();
+  const month = document.getElementById('billing-month')?.value || '';
+  const period = document.getElementById('billing-half')?.value || '';
+  const statusEl = document.getElementById('billing-search-status');
+
+  if (!warehouse || !client) {
+    showToast('Выберите склад и клиента', 'error');
+    return;
+  }
+
+  if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Поиск...'; }
+
+  try {
+    const role = localStorage.getItem('user_role') || '';
+    let url = `/billing/search?warehouse=${encodeURIComponent(warehouse)}&client=${encodeURIComponent(client)}`;
+    if (month) url += `&month=${encodeURIComponent(month)}`;
+    if (period) url += `&period=${encodeURIComponent(period)}`;
+    const result = await apiFetch(url, { headers: { 'X-User-Role': role } });
+
+    if (result.found) {
+      preloadBillingForm(result);
+      if (statusEl) { statusEl.textContent = '✅ Запись найдена и загружена.'; }
+      showToast('Данные billing загружены', 'success');
+    } else {
+      if (statusEl) { statusEl.textContent = 'ℹ️ Запись не найдена. Форма очищена для новой записи.'; }
+      clearBillingForm();
+      showToast('Новая запись — введите данные', 'default');
+    }
+  } catch (err) {
+    if (statusEl) { statusEl.textContent = `Ошибка: ${err.message}`; }
+    showToast(`Ошибка поиска: ${err.message}`, 'error');
+  }
+}
+
+function preloadBillingForm(data) {
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val !== undefined && val !== null && val !== '') el.value = val;
+  };
+  const fmt = document.getElementById('billing-format')?.value || 'new';
+  if (fmt === 'new' || fmt === 'new-no-vat') {
+    setVal('bv2-shipments-with-vat', data.shipments_with_vat);
+    setVal('bv2-units', data.units_count);
+    setVal('bv2-storage-with-vat', data.storage_with_vat);
+    setVal('bv2-pallets', data.pallets_count);
+    setVal('bv2-returns-pickup-with-vat', data.returns_pickup_with_vat);
+    setVal('bv2-returns-trips', data.returns_trips_count);
+    setVal('bv2-additional-with-vat', data.additional_services_with_vat);
+    setVal('bv2-penalties', data.penalties);
+    setVal('bv2-payment-status', data.payment_status);
+    setVal('bv2-payment-amount', data.payment_amount);
+    setVal('bv2-payment-date', data.payment_date);
+    calcBillingTotalsV2();
+  } else {
+    setVal('p1-shipments', data.p1_shipments_amount);
+    setVal('p1-units', data.p1_units);
+    setVal('p1-storage', data.p1_storage_amount);
+    setVal('p1-pallets', data.p1_pallets);
+    setVal('p1-returns', data.p1_returns_amount);
+    setVal('p1-returns-trips', data.p1_returns_trips);
+    setVal('p1-extra', data.p1_extra_services);
+    setVal('p1-penalties', data.p1_penalties);
+    setVal('p2-shipments', data.p2_shipments_amount);
+    setVal('p2-units', data.p2_units);
+    setVal('p2-storage', data.p2_storage_amount);
+    setVal('p2-pallets', data.p2_pallets);
+    setVal('p2-returns', data.p2_returns_amount);
+    setVal('p2-returns-trips', data.p2_returns_trips);
+    setVal('p2-extra', data.p2_extra_services);
+    setVal('p2-penalties', data.p2_penalties);
+    calcBillingTotals('p1');
+    calcBillingTotals('p2');
+  }
+}
+
+function clearBillingForm() {
+  const ids = [
+    'bv2-shipments-with-vat','bv2-units','bv2-storage-with-vat','bv2-pallets',
+    'bv2-returns-pickup-with-vat','bv2-returns-trips','bv2-additional-with-vat',
+    'bv2-penalties','bv2-payment-amount','bv2-payment-date',
+    'p1-shipments','p1-units','p1-storage','p1-pallets','p1-returns','p1-returns-trips','p1-extra','p1-penalties',
+    'p2-shipments','p2-units','p2-storage','p2-pallets','p2-returns','p2-returns-trips','p2-extra','p2-penalties',
+  ];
+  ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const statusEl = document.getElementById('bv2-payment-status');
+  if (statusEl) statusEl.value = '';
+  calcBillingTotalsV2();
+  calcBillingTotals('p1');
+  calcBillingTotals('p2');
+}
+
 async function saveBilling() {
   const warehouse = document.getElementById('billing-warehouse')?.value;
-  const clientName = document.getElementById('billing-client')?.value?.trim();
+  const clientName = document.getElementById('billing-client-select')?.value?.trim();
   const fmt = document.getElementById('billing-format')?.value || 'new';
 
   if (!warehouse || !clientName) {
     showToast('Укажите склад и клиента', 'error');
     return;
   }
+
+  const month = document.getElementById('billing-month')?.value || null;
+  const half = document.getElementById('billing-half')?.value || null;
+  const period = month ? (half ? `${month}-${half}` : month) : null;
 
   const pVal = (id) => {
     const v = document.getElementById(id)?.value;
@@ -1565,19 +1841,25 @@ async function saveBilling() {
 
   let body;
 
-  if (fmt === 'new') {
-    const period = document.getElementById('billing-period')?.value || null;
+  if (fmt === 'new' || fmt === 'new-no-vat') {
     body = {
       client: clientName,
       period,
-      shipments_with_vat:          pVal('bv2-shipments-with-vat'),
-      storage_with_vat:            pVal('bv2-storage-with-vat'),
-      returns_pickup_with_vat:     pVal('bv2-returns-pickup-with-vat'),
-      returns_trips_count:         pVal('bv2-returns-trips'),
-      additional_services_with_vat:pVal('bv2-additional-with-vat'),
-      penalties:                   pVal('bv2-penalties'),
-      payment_status:              document.getElementById('bv2-payment-status')?.value || null,
+      input_mode: fmt === 'new-no-vat' ? BILLING_INPUT_MODE_WITHOUT_VAT : BILLING_INPUT_MODE_WITH_VAT,
+      shipments_with_vat:           pVal('bv2-shipments-with-vat'),
+      units_count:                  pVal('bv2-units') != null ? parseInt(pVal('bv2-units')) : null,
+      storage_with_vat:             pVal('bv2-storage-with-vat'),
+      pallets_count:                pVal('bv2-pallets') != null ? parseInt(pVal('bv2-pallets')) : null,
+      returns_pickup_with_vat:      pVal('bv2-returns-pickup-with-vat'),
+      returns_trips_count:          pVal('bv2-returns-trips') != null ? parseInt(pVal('bv2-returns-trips')) : null,
+      additional_services_with_vat: pVal('bv2-additional-with-vat'),
+      penalties:                    pVal('bv2-penalties'),
+      payment_status:               document.getElementById('bv2-payment-status')?.value || null,
+      payment_amount:               pVal('bv2-payment-amount'),
+      payment_date:                 document.getElementById('bv2-payment-date')?.value || null,
     };
+    // Remove null values
+    Object.keys(body).forEach(k => body[k] == null && delete body[k]);
   } else {
     body = {
       client_name: clientName,
@@ -1642,7 +1924,67 @@ async function markPayment() {
 // ==========================================
 // EXPENSES FORM
 // ==========================================
+const EXPENSE_CATS_L2 = {
+  'логистика': ['Забор возвратов', 'Отвоз FBO', 'Отвоз FBS', 'Другое'],
+  'наёмный персонал': ['Погрузочно-разгрузочные работы', 'Упаковка товара', 'Другое'],
+  'расходники': ['Упаковочный материал', 'Паллеты', 'Короба', 'Пломбы'],
+  'другое': [],
+};
+
+const COMMENT_REQUIRED_L2 = new Set(['другое', 'упаковочный материал']);
+
+function updateExpenseCat2(cat1Val, cat2SelectId, cat2FieldId) {
+  const cat2Select = document.getElementById(cat2SelectId);
+  const cat2Field = document.getElementById(cat2FieldId);
+  if (!cat2Select || !cat2Field) return;
+
+  const options = EXPENSE_CATS_L2[cat1Val] || [];
+  cat2Select.innerHTML = '<option value="">Выберите...</option>';
+  options.forEach(opt => {
+    const o = document.createElement('option');
+    o.value = opt.toLowerCase();
+    o.textContent = opt;
+    cat2Select.appendChild(o);
+  });
+  cat2Field.style.display = (options.length > 0) ? 'block' : 'none';
+}
+
+function updateExpenseCommentVisibility(cat1Val, cat2Val, commentFieldId, requiredMarkId) {
+  const commentField = document.getElementById(commentFieldId);
+  const requiredMark = document.getElementById(requiredMarkId);
+  if (!commentField) return;
+
+  const cat1Required = (cat1Val === 'другое');
+  const cat2Required = cat2Val && COMMENT_REQUIRED_L2.has(cat2Val.toLowerCase());
+  const needsComment = cat1Required || cat2Required;
+
+  commentField.style.display = (needsComment || cat1Val === 'другое') ? 'block' : 'none';
+  if (requiredMark) requiredMark.style.display = needsComment ? 'inline' : 'none';
+}
+
 function initExpensesForm() {
+  // Category level 1 change → populate level 2
+  const cat1El = document.getElementById('expense-cat1');
+  const cat2El = document.getElementById('expense-cat2');
+  const commentInput = document.getElementById('expense-comment');
+
+  if (cat1El) {
+    cat1El.addEventListener('change', () => {
+      const cat1Val = cat1El.value;
+      updateExpenseCat2(cat1Val, 'expense-cat2', 'expense-cat2-field');
+      updateExpenseCommentVisibility(cat1Val, '', 'expense-comment-field', 'expense-comment-required');
+      if (cat2El) cat2El.value = '';
+      if (commentInput) commentInput.value = '';
+    });
+  }
+  if (cat2El) {
+    cat2El.addEventListener('change', () => {
+      const cat1Val = cat1El?.value || '';
+      const cat2Val = cat2El.value;
+      updateExpenseCommentVisibility(cat1Val, cat2Val, 'expense-comment-field', 'expense-comment-required');
+    });
+  }
+
   // Live VAT calc (supports both VAT rate and explicit VAT amount)
   const amountEl = document.getElementById('expense-amount');
   const vatRateEl = document.getElementById('expense-vat-rate');
@@ -1673,37 +2015,175 @@ function initExpensesForm() {
   if (vatRateEl) vatRateEl.addEventListener('input', updateCalc);
   if (vatEl) vatEl.addEventListener('input', updateCalc);
 
-  // Save expense
+  // Save single expense
   const saveBtn = document.getElementById('expense-save-btn');
   if (saveBtn) saveBtn.addEventListener('click', saveExpense);
 
   // Load expenses list
   const loadBtn = document.getElementById('load-expenses-btn');
   if (loadBtn) loadBtn.addEventListener('click', loadExpenses);
+
+  // Bulk entry
+  const bulkAddBtn = document.getElementById('bulk-add-row-btn');
+  if (bulkAddBtn) bulkAddBtn.addEventListener('click', addBulkRow);
+
+  const bulkSaveBtn = document.getElementById('bulk-save-btn');
+  if (bulkSaveBtn) bulkSaveBtn.addEventListener('click', saveBulkExpenses);
+}
+
+let _bulkRowIndex = 0;
+
+function addBulkRow() {
+  const container = document.getElementById('bulk-rows-container');
+  const saveActionsEl = document.getElementById('bulk-save-row');
+  if (!container) return;
+
+  const idx = _bulkRowIndex++;
+  const row = document.createElement('div');
+  row.className = 'bulk-expense-row card';
+  row.id = `bulk-row-${idx}`;
+  row.style.cssText = 'position:relative;padding:12px;margin-bottom:8px;';
+  row.innerHTML = `
+    <button class="btn btn-sm" style="position:absolute;top:8px;right:8px;color:var(--color-danger);" onclick="removeBulkRow(${idx})">✕</button>
+    <div class="field-group">
+      <div class="field-row">
+        <div class="field"><label>Категория 1 *</label>
+          <div class="select-wrapper"><select id="bulk-cat1-${idx}" class="bulk-cat1">
+            <option value="">Выбрать...</option>
+            <option value="логистика">Логистика</option>
+            <option value="наёмный персонал">Наёмный персонал</option>
+            <option value="расходники">Расходники</option>
+            <option value="другое">Другое</option>
+          </select></div>
+        </div>
+        <div class="field" id="bulk-cat2-field-${idx}" style="display:none;"><label>Категория 2</label>
+          <div class="select-wrapper"><select id="bulk-cat2-${idx}"></select></div>
+        </div>
+      </div>
+      <div class="field" id="bulk-comment-field-${idx}" style="display:none;"><label>Комментарий <span id="bulk-comment-req-${idx}" style="display:none;color:var(--color-danger);">*</span></label>
+        <input type="text" id="bulk-comment-${idx}" placeholder="Комментарий..." />
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Сумма с НДС, ₽ *</label><input type="number" id="bulk-amount-${idx}" placeholder="0.00" min="0" step="0.01" /></div>
+        <div class="field"><label>Ставка НДС</label><input type="number" id="bulk-vat-rate-${idx}" placeholder="0.20" min="0" max="1" step="0.01" /></div>
+      </div>
+      <div class="field"><label>ID сделки</label><input type="text" id="bulk-deal-id-${idx}" placeholder="(необязательно)" /></div>
+    </div>
+  `;
+  container.appendChild(row);
+
+  // Hook category change
+  const cat1El = document.getElementById(`bulk-cat1-${idx}`);
+  if (cat1El) {
+    cat1El.addEventListener('change', () => {
+      const cat1Val = cat1El.value;
+      updateExpenseCat2(cat1Val, `bulk-cat2-${idx}`, `bulk-cat2-field-${idx}`);
+      updateExpenseCommentVisibility(cat1Val, '', `bulk-comment-field-${idx}`, `bulk-comment-req-${idx}`);
+    });
+  }
+  const cat2El = document.getElementById(`bulk-cat2-${idx}`);
+  if (cat2El) {
+    cat2El.addEventListener('change', () => {
+      const cat1Val = cat1El?.value || '';
+      updateExpenseCommentVisibility(cat1Val, cat2El.value, `bulk-comment-field-${idx}`, `bulk-comment-req-${idx}`);
+    });
+  }
+
+  if (saveActionsEl) saveActionsEl.style.display = 'block';
+}
+
+function removeBulkRow(idx) {
+  const row = document.getElementById(`bulk-row-${idx}`);
+  if (row) row.remove();
+  const container = document.getElementById('bulk-rows-container');
+  const saveActionsEl = document.getElementById('bulk-save-row');
+  if (container && saveActionsEl) {
+    saveActionsEl.style.display = container.children.length > 0 ? 'block' : 'none';
+  }
+}
+
+async function saveBulkExpenses() {
+  const container = document.getElementById('bulk-rows-container');
+  if (!container || container.children.length === 0) {
+    showToast('Нет строк для сохранения', 'error');
+    return;
+  }
+
+  const rows = [];
+  for (const child of container.children) {
+    const idxMatch = child.id.match(/bulk-row-(\d+)/);
+    if (!idxMatch) continue;
+    const idx = idxMatch[1];
+
+    const cat1 = document.getElementById(`bulk-cat1-${idx}`)?.value?.trim() || '';
+    const cat2 = document.getElementById(`bulk-cat2-${idx}`)?.value?.trim() || '';
+    const comment = document.getElementById(`bulk-comment-${idx}`)?.value?.trim() || '';
+    const amount = parseFloat(document.getElementById(`bulk-amount-${idx}`)?.value || 0) || 0;
+    const vatRate = parseFloat(document.getElementById(`bulk-vat-rate-${idx}`)?.value || 0) || 0;
+    const dealId = document.getElementById(`bulk-deal-id-${idx}`)?.value?.trim() || '';
+
+    if (!cat1) { showToast(`Строка ${parseInt(idx)+1}: выберите категорию 1`, 'error'); return; }
+    if (!amount) { showToast(`Строка ${parseInt(idx)+1}: укажите сумму`, 'error'); return; }
+
+    rows.push({
+      category_level_1: cat1,
+      category_level_2: cat2 || undefined,
+      comment: comment || undefined,
+      amount_with_vat: amount,
+      vat_rate: vatRate || undefined,
+      deal_id: dealId || undefined,
+    });
+  }
+
+  if (rows.length === 0) { showToast('Нет строк для сохранения', 'error'); return; }
+
+  try {
+    const role = localStorage.getItem('user_role') || '';
+    await apiFetch('/expenses/bulk', {
+      method: 'POST',
+      headers: { 'X-User-Role': role },
+      body: JSON.stringify({ rows }),
+    });
+    showToast(`Сохранено ${rows.length} расходов!`, 'success');
+    container.innerHTML = '';
+    const saveActionsEl = document.getElementById('bulk-save-row');
+    if (saveActionsEl) saveActionsEl.style.display = 'none';
+    _bulkRowIndex = 0;
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
 }
 
 async function saveExpense() {
-  const expenseType = document.getElementById('expense-type')?.value;
+  const cat1 = document.getElementById('expense-cat1')?.value?.trim() || '';
+  const cat2 = document.getElementById('expense-cat2')?.value?.trim() || '';
+  const comment = document.getElementById('expense-comment')?.value?.trim() || '';
   const amount = parseFloat(document.getElementById('expense-amount')?.value || 0);
 
-  if (!expenseType) { showToast('Выберите тип расхода', 'error'); return; }
+  if (!cat1) { showToast('Выберите категорию', 'error'); return; }
   if (!amount || amount <= 0) { showToast('Укажите сумму расхода', 'error'); return; }
+
+  // Validate comment requirement
+  const cat1Required = (cat1 === 'другое');
+  const cat2Required = cat2 && COMMENT_REQUIRED_L2.has(cat2.toLowerCase());
+  if ((cat1Required || cat2Required) && !comment) {
+    showToast('Комментарий обязателен для выбранной категории', 'error');
+    return;
+  }
 
   const dealId = document.getElementById('expense-deal-id')?.value?.trim() || null;
   const vatRate = parseFloat(document.getElementById('expense-vat-rate')?.value || 0) || 0;
   const vat = parseFloat(document.getElementById('expense-vat')?.value || 0) || 0;
 
   const payload = {
+    category_level_1: cat1,
+    category_level_2: cat2 || undefined,
+    comment: comment || undefined,
     deal_id: dealId,
-    // New field names
-    category: expenseType,
     amount_with_vat: amount,
-    vat_rate: vatRate || null,
-    // Legacy field names for backward compat
-    expense_type: expenseType,
-    amount,
-    vat: vat || null,
-    amount_without_vat: vatRate ? null : amount - vat,
+    vat_rate: vatRate || undefined,
+    vat: vat || undefined,
+    amount_without_vat: vatRate ? undefined : amount - vat,
   };
 
   try {
@@ -1715,12 +2195,16 @@ async function saveExpense() {
     });
     showToast('Расход добавлен!', 'success');
     // Clear form
-    ['expense-deal-id', 'expense-amount', 'expense-vat-rate', 'expense-vat'].forEach(id => {
+    ['expense-deal-id', 'expense-amount', 'expense-vat-rate', 'expense-vat', 'expense-comment'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
     });
-    const typeEl = document.getElementById('expense-type');
-    if (typeEl) typeEl.value = '';
+    const cat1El = document.getElementById('expense-cat1');
+    if (cat1El) cat1El.value = '';
+    const cat2El = document.getElementById('expense-cat2');
+    if (cat2El) cat2El.value = '';
+    document.getElementById('expense-cat2-field')?.style && (document.getElementById('expense-cat2-field').style.display = 'none');
+    document.getElementById('expense-comment-field')?.style && (document.getElementById('expense-comment-field').style.display = 'none');
     const calcNoVatEl = document.getElementById('expense-calc-no-vat');
     const calcVatAmountEl = document.getElementById('expense-calc-vat-amount');
     if (calcNoVatEl) calcNoVatEl.textContent = '0.00 ₽';
@@ -1754,7 +2238,10 @@ async function loadExpenses() {
 
     if (listEl) {
       listEl.innerHTML = data.map(e => {
-        const category = e.category || e.expense_type || '—';
+        const cat1 = e.category_level_1 || '';
+        const cat2 = e.category_level_2 || '';
+        const category = cat1 ? (cat2 ? `${cat1} / ${cat2}` : cat1) : (e.category || e.expense_type || '—');
+        const comment = e.comment || '';
         const amountWithVat = parseFloat(e.amount_with_vat || e.amount) || 0;
         const amountNoVat = parseFloat(e.amount_without_vat) || 0;
         const vatAmount = parseFloat(e.vat_amount || e.vat) || 0;
@@ -1765,6 +2252,7 @@ async function loadExpenses() {
             <span class="expense-type-badge">${escHtml(category)}</span>
             <span class="expense-amount">${formatCurrency(amountWithVat)}</span>
           </div>
+          ${comment ? `<div class="expense-row-comment" style="font-size:12px;color:var(--color-text-secondary);margin-top:2px;">${escHtml(comment)}</div>` : ''}
           ${amountNoVat ? `<div class="expense-row-vat"><span>Без НДС: ${formatCurrency(amountNoVat)}</span><span>НДС: ${formatCurrency(vatAmount)}</span></div>` : ''}
           <div class="expense-row-meta">
             ${e.deal_id ? `<span>Сделка: ${escHtml(e.deal_id)}</span>` : ''}
@@ -1799,6 +2287,14 @@ async function downloadReport(reportType, fmt) {
   if (reportType === 'warehouse') {
     const warehouse = document.getElementById('report-warehouse')?.value || 'msk';
     url = `/reports/warehouse/${warehouse}?fmt=${fmt}`;
+  } else if (reportType === 'billing-by-month') {
+    const month = document.getElementById('report-month')?.value || '';
+    if (!month) { showToast('Выберите месяц для отчёта', 'error'); return; }
+    url = `/reports/billing-by-month?month=${encodeURIComponent(month)}&fmt=${fmt}`;
+  } else if (reportType === 'billing-by-client') {
+    const client = document.getElementById('report-client-filter')?.value?.trim() || '';
+    if (!client) { showToast('Укажите имя клиента', 'error'); return; }
+    url = `/reports/billing-by-client?client=${encodeURIComponent(client)}&fmt=${fmt}`;
   } else {
     url = `/reports/${reportType}?fmt=${fmt}`;
   }

@@ -4,6 +4,7 @@ expenses.py – Expense management endpoints.
 Routes
 ------
 POST /expenses            – add a new expense
+POST /expenses/bulk       – add multiple expenses in one request
 GET  /expenses            – list expenses (optional filters: deal_id, expense_type)
 """
 
@@ -12,9 +13,9 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
-from backend.models.schemas import ExpenseCreate, ExpenseResponse
+from backend.models.schemas import ExpenseCreate, ExpenseBulkCreate, ExpenseResponse
 from backend.services import settings_service
-from backend.services.expenses_service import add_expense, get_expenses
+from backend.services.expenses_service import add_expense, add_expenses_bulk, get_expenses
 from backend.services.permissions import (
     NO_ACCESS_ROLE,
     EXPENSE_ADD_ROLES,
@@ -65,7 +66,7 @@ async def create_expense(
     Add a new expense record to the 'expenses' sheet.
 
     Accepts both old-style keys (expense_type, amount, vat) and new-style keys
-    (category, amount_with_vat, vat_rate).  New-style keys take priority.
+    (category_level_1, category_level_2, comment, amount_with_vat, vat_rate).
 
     Accessible by: manager, accounting, operations_director, admin.
     """
@@ -92,6 +93,46 @@ async def create_expense(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SheetsError as exc:
         logger.error("Sheets error adding expense: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/bulk", response_model=List[Dict[str, Any]])
+async def create_expenses_bulk(
+    body: ExpenseBulkCreate,
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
+) -> List[Dict[str, Any]]:
+    """
+    Add multiple expense rows in a single request (bulk entry mode).
+
+    Each row in the 'rows' list is validated and written independently.
+    The first invalid row causes the entire request to fail with a 422 error
+    that identifies the row index.
+
+    Accessible by: manager, accounting, operations_director, admin.
+    """
+    user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
+    if role == NO_ACCESS_ROLE:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not check_role(role, EXPENSE_ADD_ROLES):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    actor = user_id or full_name or role
+    rows_data = []
+    for row in body.rows:
+        row_dict = row.model_dump(exclude_none=True)
+        if "created_by" not in row_dict:
+            row_dict["created_by"] = actor
+        rows_data.append(row_dict)
+
+    try:
+        results = add_expenses_bulk(rows=rows_data, user=actor, role=role)
+        return results
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SheetsError as exc:
+        logger.error("Sheets error adding bulk expenses: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

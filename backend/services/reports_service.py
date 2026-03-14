@@ -191,6 +191,12 @@ def generate_profit_report(fmt: str = "csv") -> bytes:
     return _serialise(data, fmt)
 
 
+# ---------------------------------------------------------------------------
+# Payment status constants (used by multiple report generators)
+# ---------------------------------------------------------------------------
+_PAID_STATUSES = frozenset({"оплачено", "paid", "оплачен"})
+
+
 def generate_warehouse_revenue_report(fmt: str = "csv") -> bytes:
     """
     Return aggregated revenue (with VAT, without VAT, VAT amount) per warehouse
@@ -221,3 +227,114 @@ def generate_warehouse_revenue_report(fmt: str = "csv") -> bytes:
                 "payment_status": e.get("payment_status", ""),
             })
     return _serialise(combined, fmt)
+
+
+def generate_paid_deals_report(fmt: str = "csv") -> bytes:
+    """Return deals that have been fully paid (payment_status == 'оплачено' or paid_amount >= revenue)."""
+    from backend.services.deals_service import get_all_deals
+    try:
+        deals = get_all_deals()
+    except Exception as exc:
+        logger.warning("Could not read deals for paid report: %s", exc)
+        return _serialise([], fmt)
+
+    paid = []
+    for d in deals:
+        status = str(d.get("payment_status", "")).strip().lower()
+        paid_amount = _to_float(d.get("paid_amount") or d.get("paid") or 0)
+        revenue = _to_float(d.get("revenue_with_vat") or d.get("charged_with_vat") or 0)
+        if status in _PAID_STATUSES or (revenue > 0 and paid_amount >= revenue):
+            paid.append(d)
+
+    return _serialise(paid, fmt)
+
+
+def generate_unpaid_deals_report(fmt: str = "csv") -> bytes:
+    """Return deals that have not been fully paid."""
+    from backend.services.deals_service import get_all_deals
+    try:
+        deals = get_all_deals()
+    except Exception as exc:
+        logger.warning("Could not read deals for unpaid report: %s", exc)
+        return _serialise([], fmt)
+
+    unpaid = []
+    for d in deals:
+        status = str(d.get("payment_status", "")).strip().lower()
+        paid_amount = _to_float(d.get("paid_amount") or d.get("paid") or 0)
+        revenue = _to_float(d.get("revenue_with_vat") or d.get("charged_with_vat") or 0)
+        if status not in _PAID_STATUSES and not (revenue > 0 and paid_amount >= revenue):
+            unpaid.append(d)
+
+    return _serialise(unpaid, fmt)
+
+
+def generate_paid_billing_report(fmt: str = "csv") -> bytes:
+    """Return billing entries with payment_status == 'оплачено'."""
+    from backend.services.sheets_service import BILLING_SHEETS
+    from backend.services.billing_service import get_billing_entries
+
+    paid: List[dict] = []
+    for wh_key in BILLING_SHEETS:
+        for e in get_billing_entries(wh_key):
+            status = str(e.get("payment_status", "")).strip().lower()
+            if status in _PAID_STATUSES:
+                paid.append({"warehouse": wh_key, **e})
+
+    return _serialise(paid, fmt)
+
+
+def generate_unpaid_billing_report(fmt: str = "csv") -> bytes:
+    """Return billing entries that are not marked as paid."""
+    from backend.services.sheets_service import BILLING_SHEETS
+    from backend.services.billing_service import get_billing_entries
+
+    unpaid: List[dict] = []
+    for wh_key in BILLING_SHEETS:
+        for e in get_billing_entries(wh_key):
+            status = str(e.get("payment_status", "")).strip().lower()
+            if status not in _PAID_STATUSES:
+                unpaid.append({"warehouse": wh_key, **e})
+
+    return _serialise(unpaid, fmt)
+
+
+def generate_billing_by_month_report(month: str, fmt: str = "csv") -> bytes:
+    """
+    Return billing entries for a specific month (YYYY-MM format).
+
+    Matches entries whose 'period' field starts with the given month string.
+    For old-format sheets (no period column), all entries are returned.
+    """
+    from backend.services.sheets_service import BILLING_SHEETS
+    from backend.services.billing_service import get_billing_entries
+
+    result: List[dict] = []
+    for wh_key in BILLING_SHEETS:
+        for e in get_billing_entries(wh_key):
+            period = str(e.get("period", "")).strip()
+            # New format: filter by period prefix
+            if period:
+                if period == month or period.startswith(f"{month}-"):
+                    result.append({"warehouse": wh_key, **e})
+            else:
+                # Old format: no period column — include all entries
+                result.append({"warehouse": wh_key, **e})
+
+    return _serialise(result, fmt)
+
+
+def generate_billing_by_client_report(client: str, fmt: str = "csv") -> bytes:
+    """Return billing entries for a specific client across all warehouses."""
+    from backend.services.sheets_service import BILLING_SHEETS
+    from backend.services.billing_service import get_billing_entries
+
+    result: List[dict] = []
+    client_lower = client.strip().lower()
+    for wh_key in BILLING_SHEETS:
+        for e in get_billing_entries(wh_key):
+            c = (e.get("client") or e.get("client_name", "")).strip().lower()
+            if c == client_lower:
+                result.append({"warehouse": wh_key, **e})
+
+    return _serialise(result, fmt)
