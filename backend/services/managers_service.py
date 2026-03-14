@@ -24,7 +24,7 @@ def _manager_to_dict(manager: Manager, role: str = "manager") -> Dict:
     """Convert a Manager ORM object to the dict format expected by the Mini App."""
     return {
         "manager_id": str(manager.id),
-        "manager_name": manager.full_name,
+        "manager_name": manager.manager_name,
         "role": role,
         "created_at": (
             manager.created_at.strftime("%Y-%m-%d %H:%M:%S")
@@ -35,9 +35,9 @@ def _manager_to_dict(manager: Manager, role: str = "manager") -> Dict:
 
 
 async def get_managers(db: AsyncSession) -> List[dict]:
-    """Return all active managers from the managers table."""
+    """Return all managers from the managers table."""
     result = await db.execute(
-        select(Manager).where(Manager.active.is_(True)).order_by(Manager.id)
+        select(Manager).order_by(Manager.id)
     )
     managers = result.scalars().all()
     return [_manager_to_dict(m) for m in managers]
@@ -51,7 +51,7 @@ async def add_manager(
     if not manager_name:
         raise ValueError("manager_name cannot be empty")
 
-    manager = Manager(full_name=manager_name, active=True)
+    manager = Manager(manager_name=manager_name)
     db.add(manager)
     await db.flush()
     await db.refresh(manager)
@@ -83,7 +83,7 @@ async def update_manager(
         return None
 
     if manager_name is not None:
-        manager.full_name = manager_name
+        manager.manager_name = manager_name
     await db.flush()
     await db.refresh(manager)
     logger.info("Updated manager id=%s", mid)
@@ -91,7 +91,7 @@ async def update_manager(
 
 
 async def delete_manager(db: AsyncSession, manager_id: str) -> bool:
-    """Soft-delete a manager. Returns True if deleted, False if not found."""
+    """Delete a manager. Returns True if deleted, False if not found."""
     try:
         mid = int(manager_id)
     except (ValueError, TypeError):
@@ -103,8 +103,8 @@ async def delete_manager(db: AsyncSession, manager_id: str) -> bool:
     if manager is None:
         return False
 
-    manager.active = False
+    await db.delete(manager)
     await db.flush()
-    logger.info("Soft-deleted manager id=%s", mid)
+    logger.info("Deleted manager id=%s", mid)
     return True
 

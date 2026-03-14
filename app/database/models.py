@@ -135,11 +135,15 @@ class Manager(Base):
     __tablename__ = "managers"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    telegram_id: Mapped[Optional[int]] = mapped_column(BigInteger, unique=True)
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    manager_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # FK to the roles table; nullable so managers can be created without an explicit role
+    role_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("roles.id"))
+    telegram_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, unique=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     deals: Mapped[list["Deal"]] = relationship("Deal", back_populates="manager_obj")
@@ -149,11 +153,12 @@ class Client(Base):
     __tablename__ = "clients"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(300), nullable=False)
-    contact: Mapped[Optional[str]] = mapped_column(String(200))
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    client_name: Mapped[str] = mapped_column(String(300), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     deals: Mapped[list["Deal"]] = relationship("Deal", back_populates="client_obj")

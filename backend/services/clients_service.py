@@ -24,7 +24,7 @@ def _client_to_dict(client: Client) -> Dict:
     """Convert a Client ORM object to the dict format expected by the Mini App."""
     return {
         "client_id": str(client.id),
-        "client_name": client.name,
+        "client_name": client.client_name,
         "created_at": (
             client.created_at.strftime("%Y-%m-%d %H:%M:%S")
             if client.created_at
@@ -34,9 +34,9 @@ def _client_to_dict(client: Client) -> Dict:
 
 
 async def get_clients(db: AsyncSession) -> List[dict]:
-    """Return all active clients from the clients table."""
+    """Return all clients from the clients table."""
     result = await db.execute(
-        select(Client).where(Client.active.is_(True)).order_by(Client.id)
+        select(Client).order_by(Client.id)
     )
     clients = result.scalars().all()
     return [_client_to_dict(c) for c in clients]
@@ -48,7 +48,7 @@ async def add_client(db: AsyncSession, client_name: str) -> dict:
     if not client_name:
         raise ValueError("client_name cannot be empty")
 
-    client = Client(name=client_name, active=True)
+    client = Client(client_name=client_name)
     db.add(client)
     await db.flush()
     await db.refresh(client)
@@ -75,7 +75,7 @@ async def update_client(
     if client is None:
         return None
 
-    client.name = client_name
+    client.client_name = client_name
     await db.flush()
     await db.refresh(client)
     logger.info("Updated client id=%s new_name=%r", cid, client_name)
@@ -83,7 +83,7 @@ async def update_client(
 
 
 async def delete_client(db: AsyncSession, client_id: str) -> bool:
-    """Soft-delete a client. Returns True if deleted, False if not found."""
+    """Delete a client. Returns True if deleted, False if not found."""
     try:
         cid = int(client_id)
     except (ValueError, TypeError):
@@ -95,8 +95,8 @@ async def delete_client(db: AsyncSession, client_id: str) -> bool:
     if client is None:
         return False
 
-    client.active = False
+    await db.delete(client)
     await db.flush()
-    logger.info("Soft-deleted client id=%s", cid)
+    logger.info("Deleted client id=%s", cid)
     return True
 
