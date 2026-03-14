@@ -94,6 +94,7 @@ _SUM_FIELDS_P2 = [
 
 BILLING_HEADERS_V2: List[str] = [
     "client",
+    "month",
     "period",
     "input_mode",
     "shipments_with_vat",
@@ -129,9 +130,14 @@ _CALC_FIELDS_V2 = frozenset({
     "total_without_vat", "total_vat", "total_with_vat",
 })
 
-# Input-mode constants
-INPUT_MODE_WITH_VAT = "с НДС"
-INPUT_MODE_WITHOUT_VAT = "без НДС"
+# Input-mode constants (full names as per updated sheet spec)
+INPUT_MODE_WITH_VAT = "Новый (с НДС)"
+INPUT_MODE_WITHOUT_VAT = "Новый (без НДС)"
+INPUT_MODE_OLD = "Старый (p1/p2)"
+
+# Backward-compat aliases accepted from older clients / sheets (lowercase for matching)
+_INPUT_MODE_WITHOUT_VAT_ALIASES_LOWER = frozenset({"без ндс", "новый (без ндс)"})
+_INPUT_MODE_OLD_ALIAS_LOWER = INPUT_MODE_OLD.lower()
 
 # ---------------------------------------------------------------------------
 # Format detection
@@ -185,8 +191,11 @@ def _calc_billing_totals_v2(row_dict: Dict[str, Any]) -> Dict[str, Any]:
     Calculate new-format billing totals.
 
     input_mode controls VAT handling:
-      "с НДС" (default) – entered values are WITH VAT; auto-calc VAT breakdown (20% rate)
-      "без НДС"          – entered values are WITHOUT VAT; vat=0, total_with_vat=total_without_vat
+      "Новый (с НДС)" (default) – entered values are WITH VAT; auto-calc VAT breakdown (20% rate)
+      "Новый (без НДС)"          – entered values are WITHOUT VAT; vat=0, total_with_vat=total_without_vat
+      "Старый (p1/p2)"           – preserve existing without_vat/vat breakdown; just sum totals
+
+    Backward-compat aliases ("с НДС", "без НДС") are also accepted.
 
     Totals (per problem spec):
       total_without_vat = sum(without_vat for all services) - penalties
@@ -195,10 +204,40 @@ def _calc_billing_totals_v2(row_dict: Dict[str, Any]) -> Dict[str, Any]:
 
     Returns the same dict (modified in-place).
     """
-    input_mode = str(row_dict.get("input_mode") or INPUT_MODE_WITH_VAT).strip()
+    input_mode_raw = str(row_dict.get("input_mode") or INPUT_MODE_WITH_VAT).strip()
+    input_mode_lower = input_mode_raw.lower()
     services = ["shipments", "storage", "returns_pickup", "additional_services"]
 
-    if input_mode == INPUT_MODE_WITHOUT_VAT:
+    # Resolve to canonical mode using aliases for backward compat
+    if input_mode_lower in _INPUT_MODE_WITHOUT_VAT_ALIASES_LOWER or input_mode_lower == INPUT_MODE_WITHOUT_VAT.lower():
+        canonical_mode = INPUT_MODE_WITHOUT_VAT
+    elif input_mode_lower == _INPUT_MODE_OLD_ALIAS_LOWER:
+        canonical_mode = INPUT_MODE_OLD
+    else:
+        # Default: "Новый (с НДС)" — also covers legacy "с НДС"
+        canonical_mode = INPUT_MODE_WITH_VAT
+
+    if canonical_mode == INPUT_MODE_OLD:
+        # "Старый (p1/p2)": use old-style p1/p2 calculation via _calc_totals.
+        # For rows stored in new-format sheets with this mode, just calculate
+        # totals from already-broken-down values without re-splitting VAT.
+        penalties = safe_float(row_dict.get("penalties", 0))
+        total_without_vat = round(
+            sum(safe_float(row_dict.get(f"{svc}_without_vat", 0)) for svc in services)
+            - penalties,
+            2,
+        )
+        total_vat = round(
+            sum(safe_float(row_dict.get(f"{svc}_vat", 0)) for svc in services),
+            2,
+        )
+        total_with_vat = round(total_without_vat + total_vat, 2)
+        row_dict["total_without_vat"] = total_without_vat
+        row_dict["total_vat"] = total_vat
+        row_dict["total_with_vat"] = total_with_vat
+        return row_dict
+
+    if canonical_mode == INPUT_MODE_WITHOUT_VAT:
         # Values are already without VAT; no VAT is added.
         # We store the same value in both *_with_vat and *_without_vat fields
         # so that downstream code reading *_without_vat gets the correct amount.
@@ -278,17 +317,25 @@ def _get_client_key(header_map: Dict[str, int]) -> str:
 
 
 def _find_row_by_client_period(
-    ws, client_name: str, period: str, header_map: Dict[str, int]
+    ws, client_name: str, period: str, header_map: Dict[str, int],
+    month: str = "",
 ) -> Optional[int]:
     """
-    Return the 1-based row index for the row whose client+period columns match.
-    Falls back to client-only match if period column is absent.
+    Return the 1-based row index for the row whose client + month + period columns match.
+
+    When the sheet has a separate 'month' column (new structure), both month and
+    period are matched individually.  When there is no 'month' column the combined
+    period value (e.g. "2024-01-p1") is matched against the 'period' column as
+    before, preserving backward compatibility.
+
+    Falls back to client-only match if no period/month columns exist.
     Returns None if not found.
     """
     client_col_idx = _get_client_col(header_map)
     if client_col_idx is None:
         return None
 
+    month_col_idx = header_map.get("month")
     period_col_idx = header_map.get("period")
 
     all_rows = ws.get_all_values()
@@ -298,10 +345,23 @@ def _find_row_by_client_period(
         row_client = row[client_col_idx].strip() if client_col_idx < len(row) else ""
         if row_client != client_name.strip():
             continue
-        if period and period_col_idx is not None:
+
+        if month_col_idx is not None:
+            # New structure: separate month and period columns
+            if month:
+                row_month = row[month_col_idx].strip() if month_col_idx < len(row) else ""
+                if row_month != month.strip():
+                    continue
+            if period and period_col_idx is not None:
+                row_period = row[period_col_idx].strip() if period_col_idx < len(row) else ""
+                if row_period != period.strip():
+                    continue
+        elif period and period_col_idx is not None:
+            # Legacy structure: period column stores combined "YYYY-MM-p1" value
             row_period = row[period_col_idx].strip() if period_col_idx < len(row) else ""
             if row_period != period.strip():
                 continue
+
         return i + 1  # 1-based row
     return None
 
@@ -322,9 +382,13 @@ def search_billing_entry(
     month:  YYYY-MM  (e.g. "2024-01")
     period: "p1", "p2", or None for full-month entries
 
-    For new-format sheets, the period column is matched as:
-      - If period given: "{month}-{period}" (e.g. "2024-01-p1")
-      - If only month given: exact match on period column OR period starts with month
+    For new-format sheets with a separate 'month' column:
+      - month and period are matched individually against their respective columns.
+
+    For new-format sheets without a 'month' column (legacy combined period):
+      - If period given: match period column against "{month}-{period}" (e.g. "2024-01-p1")
+      - If only month given: accept entries whose period column equals month or starts with
+        "{month}-"
 
     For old-format sheets, only client matching is performed (p1/p2 live as column groups).
 
@@ -336,6 +400,7 @@ def search_billing_entry(
 
     new_fmt = "client" in (entries[0] if entries else {})
     client_key = "client" if new_fmt else "client_name"
+    has_month_col = new_fmt and "month" in (entries[0] if entries else {})
 
     for entry in entries:
         entry_client = entry.get(client_key, "").strip()
@@ -346,18 +411,27 @@ def search_billing_entry(
             # Old format: just match by client
             return entry
 
-        # New format: optionally filter by period
+        # New format: optionally filter by month + period
         if month:
-            entry_period = entry.get("period", "").strip()
-            if period:
-                # Full match: e.g. "2024-01-p1"
-                expected = f"{month}-{period}"
-                if entry_period != expected:
+            if has_month_col:
+                # Separate month column
+                entry_month = entry.get("month", "").strip()
+                if entry_month != month.strip():
                     continue
+                if period:
+                    entry_period = entry.get("period", "").strip()
+                    if entry_period != period.strip():
+                        continue
             else:
-                # Only month: accept "2024-01", "2024-01-p1", "2024-01-p2"
-                if entry_period != month and not entry_period.startswith(f"{month}-"):
-                    continue
+                # Legacy: combined period column stores "YYYY-MM" or "YYYY-MM-p1"
+                entry_period = entry.get("period", "").strip()
+                if period:
+                    expected = f"{month}-{period}"
+                    if entry_period != expected:
+                        continue
+                else:
+                    if entry_period != month and not entry_period.startswith(f"{month}-"):
+                        continue
 
         return entry
 
@@ -465,8 +539,19 @@ def upsert_billing_entry(
 
     with _lock:
         period_val = str(entry_data.get("period") or "").strip()
-        if new_fmt and period_val:
-            row_num = _find_row_by_client_period(ws, client_name, period_val, header_map)
+        month_val = str(entry_data.get("month") or "").strip()
+        has_month_col = "month" in header_map
+        if new_fmt:
+            if has_month_col:
+                row_num = _find_row_by_client_period(
+                    ws, client_name, period_val, header_map, month=month_val
+                )
+            elif period_val:
+                row_num = _find_row_by_client_period(
+                    ws, client_name, period_val, header_map
+                )
+            else:
+                row_num = _find_row_by_client_period(ws, client_name, "", header_map)
         else:
             row_num = _find_row_by_client_period(ws, client_name, "", header_map)
         row_data = _dict_to_row(header_map, cleaned)

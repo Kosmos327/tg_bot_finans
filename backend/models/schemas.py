@@ -110,6 +110,7 @@ class BillingEntryCreateV2(BaseModel):
       "old"     – use old p1/p2 format via BillingEntryCreate instead
     """
     client: str
+    month: Optional[str] = None
     period: Optional[str] = None
     input_mode: Optional[str] = None  # "с НДС" | "без НДС"
 
@@ -303,6 +304,7 @@ class JournalEntryNew(BaseModel):
 
 class JournalEntryNewCreate(BaseModel):
     user: str
+    role: str = ""
     action: str
     entity: str
     entity_id: str = ""
