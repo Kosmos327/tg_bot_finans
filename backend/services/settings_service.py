@@ -493,22 +493,22 @@ async def load_all_settings_pg(db) -> dict:
     if not sources:
         sources = list(_DEFAULTS["sources"])
 
-    # Clients: active only, return names
+    # Clients: return names
     try:
         result = await db.execute(
-            sa_select(Client).where(Client.active.is_(True)).order_by(Client.name)
+            sa_select(Client).order_by(Client.client_name)
         )
-        clients = [c.name for c in result.scalars().all() if c.name]
+        clients = [c.client_name for c in result.scalars().all() if c.client_name]
     except Exception as exc:
         logger.warning("Failed to load clients from DB: %s", exc)
         clients = list(_DEFAULTS["clients"])
 
-    # Managers: active only, return names
+    # Managers: return names
     try:
         result = await db.execute(
-            sa_select(Manager).where(Manager.active.is_(True)).order_by(Manager.full_name)
+            sa_select(Manager).order_by(Manager.manager_name)
         )
-        managers = [m.full_name for m in result.scalars().all() if m.full_name]
+        managers = [m.manager_name for m in result.scalars().all() if m.manager_name]
     except Exception as exc:
         logger.warning("Failed to load managers from DB: %s", exc)
         managers = list(_DEFAULTS["managers"])
