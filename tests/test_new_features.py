@@ -23,6 +23,12 @@ os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test")
 os.environ.setdefault("WEBAPP_URL", "http://localhost")
 os.environ.setdefault("DATABASE_URL", "postgresql://user:password@localhost:5432/test")
 
+# Role passwords used by verify_role_password and /auth/role-login tests
+os.environ.setdefault("ROLE_PASSWORD_MANAGER", "1")
+os.environ.setdefault("ROLE_PASSWORD_OPERATIONS_DIRECTOR", "2")
+os.environ.setdefault("ROLE_PASSWORD_ACCOUNTING", "3")
+os.environ.setdefault("ROLE_PASSWORD_ADMIN", "12345")
+
 
 # ---------------------------------------------------------------------------
 # permissions

@@ -39,8 +39,8 @@ class Role(Base):
     __tablename__ = "roles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
-    label_ru: Mapped[Optional[str]] = mapped_column(String(100))
+    code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
 
     users: Mapped[list["AppUser"]] = relationship("AppUser", back_populates="role_obj")
 
@@ -122,10 +122,14 @@ class AppUser(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    username: Mapped[Optional[str]] = mapped_column(String(200))
     role_id: Mapped[int] = mapped_column(Integer, ForeignKey("roles.id"), nullable=False)
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     role_obj: Mapped["Role"] = relationship("Role", back_populates="users")

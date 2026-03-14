@@ -1,9 +1,11 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.database import get_db
 from backend.models.settings import UserAccessResponse
 from backend.services.telegram_auth import (
     validate_telegram_init_data,
@@ -17,6 +19,7 @@ from backend.services.permissions import (
     ROLE_LABELS_RU,
     verify_role_password,
 )
+from backend.services.miniapp_auth_service import miniapp_login
 from config.config import settings
 
 logger = logging.getLogger(__name__)
@@ -25,7 +28,68 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 # ---------------------------------------------------------------------------
-# Password-based Mini App auth
+# Mini App login with telegram_id + role + password
+# ---------------------------------------------------------------------------
+
+
+class MiniAppLoginRequest(BaseModel):
+    telegram_id: int
+    full_name: str
+    username: Optional[str] = None
+    selected_role: str
+    password: str
+
+
+class MiniAppLoginResponse(BaseModel):
+    user_id: int
+    telegram_id: int
+    full_name: str
+    username: Optional[str] = None
+    role: str
+
+
+@router.post("/miniapp-login", response_model=MiniAppLoginResponse)
+async def miniapp_login_endpoint(
+    body: MiniAppLoginRequest,
+    db: AsyncSession = Depends(get_db),
+) -> MiniAppLoginResponse:
+    """
+    Mini App login endpoint.
+
+    Accepts telegram_id, full_name, username, selected_role, and password.
+    Validates the role password, creates or updates the app_users record,
+    and auto-binds a manager record when role is 'manager'.
+
+    Returns user info on success; 403 if the password is wrong.
+    """
+    logger.info(
+        "POST /auth/miniapp-login: telegram_id=%s selected_role=%r",
+        body.telegram_id,
+        body.selected_role,
+    )
+
+    try:
+        result = await miniapp_login(
+            db=db,
+            telegram_id=body.telegram_id,
+            full_name=body.full_name,
+            username=body.username,
+            selected_role=body.selected_role,
+            password=body.password,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Invalid password for role '{body.selected_role}'",
+        ) from exc
+
+    return MiniAppLoginResponse(**result)
+
+
+# ---------------------------------------------------------------------------
+# Password-based Mini App auth (legacy role-only login)
 # ---------------------------------------------------------------------------
 
 class RoleLoginRequest(BaseModel):
@@ -123,3 +187,4 @@ async def get_user_role(
         active=active,
         editable_fields=sorted(get_editable_fields(role)),
     )
+
