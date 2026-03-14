@@ -172,7 +172,7 @@ def _load_section(key: str) -> list:
     except SheetNotFoundError:
         logger.warning("Sheet '%s' not found; using defaults for '%s'.", SHEET_SETTINGS, key)
         return list(_DEFAULTS.get(key, []))
-    except SheetsError as exc:
+    except Exception as exc:
         logger.error("Failed to load settings section '%s': %s", key, exc)
         return list(_DEFAULTS.get(key, []))
 
@@ -449,3 +449,187 @@ def delete_status(status: str) -> List[str]:
     statuses = [s for s in statuses if s != status]
     _rewrite_settings_sheet(ws, {"statuses": statuses})
     return statuses
+
+
+# ---------------------------------------------------------------------------
+# Async PostgreSQL implementations (used by routers with AsyncSession)
+# ---------------------------------------------------------------------------
+
+
+async def load_all_settings_pg(db) -> dict:
+    """
+    Load all settings sections from PostgreSQL.
+
+    Queries deal_statuses, business_directions, vat_types, sources, clients,
+    and managers tables.  Falls back to hardcoded defaults on any error.
+    """
+    from sqlalchemy import select as sa_select
+    from app.database.models import (
+        DealStatus, BusinessDirection, VatType, Source, Client, Manager,
+    )
+
+    async def _fetch_names(model, order_col):
+        try:
+            result = await db.execute(sa_select(model).order_by(order_col))
+            rows = result.scalars().all()
+            return [r.name for r in rows if r.name]
+        except Exception as exc:
+            logger.warning("Failed to load %s from DB: %s", model.__tablename__, exc)
+            return []
+
+    statuses = await _fetch_names(DealStatus, DealStatus.name)
+    if not statuses:
+        statuses = list(_DEFAULTS["statuses"])
+
+    directions = await _fetch_names(BusinessDirection, BusinessDirection.name)
+    if not directions:
+        directions = list(_DEFAULTS["business_directions"])
+
+    vat_types = await _fetch_names(VatType, VatType.name)
+    if not vat_types:
+        vat_types = list(_DEFAULTS["vat_types"])
+
+    sources = await _fetch_names(Source, Source.name)
+    if not sources:
+        sources = list(_DEFAULTS["sources"])
+
+    # Clients: active only, return names
+    try:
+        result = await db.execute(
+            sa_select(Client).where(Client.active.is_(True)).order_by(Client.name)
+        )
+        clients = [c.name for c in result.scalars().all() if c.name]
+    except Exception as exc:
+        logger.warning("Failed to load clients from DB: %s", exc)
+        clients = list(_DEFAULTS["clients"])
+
+    # Managers: active only, return names
+    try:
+        result = await db.execute(
+            sa_select(Manager).where(Manager.active.is_(True)).order_by(Manager.full_name)
+        )
+        managers = [m.full_name for m in result.scalars().all() if m.full_name]
+    except Exception as exc:
+        logger.warning("Failed to load managers from DB: %s", exc)
+        managers = list(_DEFAULTS["managers"])
+
+    return {
+        "statuses": statuses,
+        "business_directions": directions,
+        "vat_types": vat_types,
+        "sources": sources,
+        "clients": clients,
+        "managers": managers,
+    }
+
+
+async def load_business_directions_pg(db) -> List[str]:
+    """Return all business directions from PostgreSQL."""
+    from sqlalchemy import select as sa_select
+    from app.database.models import BusinessDirection
+
+    try:
+        result = await db.execute(
+            sa_select(BusinessDirection).order_by(BusinessDirection.name)
+        )
+        names = [r.name for r in result.scalars().all() if r.name]
+        return names or list(_DEFAULTS["business_directions"])
+    except Exception as exc:
+        logger.warning("Failed to load business_directions from DB: %s", exc)
+        return list(_DEFAULTS["business_directions"])
+
+
+async def add_direction_pg(db, direction: str) -> List[str]:
+    """Add a new business direction. Returns updated list."""
+    from sqlalchemy import select as sa_select
+    from app.database.models import BusinessDirection
+
+    direction = direction.strip()
+    if not direction:
+        raise ValueError("direction cannot be empty")
+
+    try:
+        existing = await db.execute(
+            sa_select(BusinessDirection).where(BusinessDirection.name == direction)
+        )
+        if existing.scalar_one_or_none() is None:
+            db.add(BusinessDirection(name=direction))
+            await db.flush()
+            logger.info("Added business direction: %r", direction)
+    except Exception as exc:
+        logger.error("Failed to add business direction: %s", exc)
+        raise
+
+    return await load_business_directions_pg(db)
+
+
+async def delete_direction_pg(db, direction: str) -> List[str]:
+    """Remove a business direction. Returns updated list."""
+    from sqlalchemy import select as sa_select, delete as sa_delete
+    from app.database.models import BusinessDirection
+
+    try:
+        await db.execute(
+            sa_delete(BusinessDirection).where(BusinessDirection.name == direction)
+        )
+        await db.flush()
+        logger.info("Deleted business direction: %r", direction)
+    except Exception as exc:
+        logger.error("Failed to delete business direction: %s", exc)
+        raise
+
+    return await load_business_directions_pg(db)
+
+
+async def load_statuses_pg(db) -> List[str]:
+    """Return all deal statuses from PostgreSQL."""
+    from sqlalchemy import select as sa_select
+    from app.database.models import DealStatus
+
+    try:
+        result = await db.execute(sa_select(DealStatus).order_by(DealStatus.name))
+        names = [r.name for r in result.scalars().all() if r.name]
+        return names or list(_DEFAULTS["statuses"])
+    except Exception as exc:
+        logger.warning("Failed to load deal_statuses from DB: %s", exc)
+        return list(_DEFAULTS["statuses"])
+
+
+async def add_status_pg(db, status: str) -> List[str]:
+    """Add a new deal status. Returns updated list."""
+    from sqlalchemy import select as sa_select
+    from app.database.models import DealStatus
+
+    status = status.strip()
+    if not status:
+        raise ValueError("status cannot be empty")
+
+    try:
+        existing = await db.execute(
+            sa_select(DealStatus).where(DealStatus.name == status)
+        )
+        if existing.scalar_one_or_none() is None:
+            db.add(DealStatus(name=status))
+            await db.flush()
+            logger.info("Added deal status: %r", status)
+    except Exception as exc:
+        logger.error("Failed to add deal status: %s", exc)
+        raise
+
+    return await load_statuses_pg(db)
+
+
+async def delete_status_pg(db, status: str) -> List[str]:
+    """Remove a deal status. Returns updated list."""
+    from sqlalchemy import delete as sa_delete
+    from app.database.models import DealStatus
+
+    try:
+        await db.execute(sa_delete(DealStatus).where(DealStatus.name == status))
+        await db.flush()
+        logger.info("Deleted deal status: %r", status)
+    except Exception as exc:
+        logger.error("Failed to delete deal status: %s", exc)
+        raise
+
+    return await load_statuses_pg(db)
