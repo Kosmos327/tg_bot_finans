@@ -37,6 +37,10 @@ from backend.services.reports_service import (
     generate_unpaid_billing_report,
     generate_billing_by_month_report,
     generate_billing_by_client_report,
+    generate_debt_by_client_report,
+    generate_debt_by_warehouse_report,
+    generate_overdue_payments_report,
+    generate_partially_paid_billing_report,
 )
 from backend.services.permissions import (
     NO_ACCESS_ROLE,
@@ -44,6 +48,7 @@ from backend.services.permissions import (
     check_role,
 )
 from backend.services.telegram_auth import extract_user_from_init_data
+from backend.services.journal_service import append_new_journal_entry
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +111,7 @@ async def download_warehouse_report(
     if fmt.lower() not in _ALLOWED_FMTS:
         raise HTTPException(status_code=400, detail=f"fmt must be csv or xlsx")
 
-    _, role, _ = _resolve_user(x_telegram_init_data, x_user_role)
+    user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
     _check_access(role)
 
     try:
@@ -114,6 +119,14 @@ async def download_warehouse_report(
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    append_new_journal_entry(
+        user=user_id or full_name or role,
+        role=role,
+        action="download_report",
+        entity="report",
+        entity_id=f"warehouse_{warehouse.lower()}",
+        details=f"fmt={fmt.lower()}",
+    )
     filename = f"billing_{warehouse.lower()}.{fmt.lower()}"
     return Response(
         content=content,
@@ -132,7 +145,7 @@ async def download_clients_report(
     if fmt.lower() not in _ALLOWED_FMTS:
         raise HTTPException(status_code=400, detail="fmt must be csv or xlsx")
 
-    _, role, _ = _resolve_user(x_telegram_init_data, x_user_role)
+    user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
     _check_access(role)
 
     try:
@@ -140,6 +153,14 @@ async def download_clients_report(
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    append_new_journal_entry(
+        user=user_id or full_name or role,
+        role=role,
+        action="download_report",
+        entity="report",
+        entity_id="clients",
+        details=f"fmt={fmt.lower()}",
+    )
     filename = f"clients_report.{fmt.lower()}"
     return Response(
         content=content,
@@ -158,7 +179,7 @@ async def download_expenses_report(
     if fmt.lower() not in _ALLOWED_FMTS:
         raise HTTPException(status_code=400, detail="fmt must be csv or xlsx")
 
-    _, role, _ = _resolve_user(x_telegram_init_data, x_user_role)
+    user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
     _check_access(role)
 
     try:
@@ -166,6 +187,14 @@ async def download_expenses_report(
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    append_new_journal_entry(
+        user=user_id or full_name or role,
+        role=role,
+        action="download_report",
+        entity="report",
+        entity_id="expenses",
+        details=f"fmt={fmt.lower()}",
+    )
     filename = f"expenses_report.{fmt.lower()}"
     return Response(
         content=content,
@@ -184,7 +213,7 @@ async def download_profit_report(
     if fmt.lower() not in _ALLOWED_FMTS:
         raise HTTPException(status_code=400, detail="fmt must be csv or xlsx")
 
-    _, role, _ = _resolve_user(x_telegram_init_data, x_user_role)
+    user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
     _check_access(role)
 
     try:
@@ -192,6 +221,14 @@ async def download_profit_report(
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    append_new_journal_entry(
+        user=user_id or full_name or role,
+        role=role,
+        action="download_report",
+        entity="report",
+        entity_id="profit",
+        details=f"fmt={fmt.lower()}",
+    )
     filename = f"profit_report.{fmt.lower()}"
     return Response(
         content=content,
@@ -362,4 +399,128 @@ async def download_billing_by_client_report(
         content=content,
         media_type=_media_type(fmt.lower()),
         headers={"Content-Disposition": f"attachment; filename=billing_client.{fmt.lower()}"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Debt / receivables reports
+# ---------------------------------------------------------------------------
+
+@router.get("/debt-by-client")
+async def download_debt_by_client_report(
+    fmt: str = Query(default="csv"),
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
+) -> Response:
+    """Download a debt summary grouped by client across all warehouses."""
+    if fmt.lower() not in _ALLOWED_FMTS:
+        raise HTTPException(status_code=400, detail="fmt must be csv or xlsx")
+    user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
+    _check_access(role)
+    try:
+        content = generate_debt_by_client_report(fmt.lower())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    append_new_journal_entry(
+        user=user_id or full_name or role,
+        role=role,
+        action="download_report",
+        entity="report",
+        entity_id="debt_by_client",
+        details=f"fmt={fmt.lower()}",
+    )
+    return Response(
+        content=content,
+        media_type=_media_type(fmt.lower()),
+        headers={"Content-Disposition": f"attachment; filename=debt_by_client.{fmt.lower()}"},
+    )
+
+
+@router.get("/debt-by-warehouse")
+async def download_debt_by_warehouse_report(
+    fmt: str = Query(default="csv"),
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
+) -> Response:
+    """Download a debt summary grouped by warehouse."""
+    if fmt.lower() not in _ALLOWED_FMTS:
+        raise HTTPException(status_code=400, detail="fmt must be csv or xlsx")
+    user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
+    _check_access(role)
+    try:
+        content = generate_debt_by_warehouse_report(fmt.lower())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    append_new_journal_entry(
+        user=user_id or full_name or role,
+        role=role,
+        action="download_report",
+        entity="report",
+        entity_id="debt_by_warehouse",
+        details=f"fmt={fmt.lower()}",
+    )
+    return Response(
+        content=content,
+        media_type=_media_type(fmt.lower()),
+        headers={"Content-Disposition": f"attachment; filename=debt_by_warehouse.{fmt.lower()}"},
+    )
+
+
+@router.get("/overdue-payments")
+async def download_overdue_payments_report(
+    fmt: str = Query(default="csv"),
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
+) -> Response:
+    """Download a report of overdue (unpaid/partial + past end_date) billing entries."""
+    if fmt.lower() not in _ALLOWED_FMTS:
+        raise HTTPException(status_code=400, detail="fmt must be csv or xlsx")
+    user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
+    _check_access(role)
+    try:
+        content = generate_overdue_payments_report(fmt.lower())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    append_new_journal_entry(
+        user=user_id or full_name or role,
+        role=role,
+        action="download_report",
+        entity="report",
+        entity_id="overdue_payments",
+        details=f"fmt={fmt.lower()}",
+    )
+    return Response(
+        content=content,
+        media_type=_media_type(fmt.lower()),
+        headers={"Content-Disposition": f"attachment; filename=overdue_payments.{fmt.lower()}"},
+    )
+
+
+@router.get("/partially-paid-billing")
+async def download_partially_paid_billing_report(
+    fmt: str = Query(default="csv"),
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
+) -> Response:
+    """Download a report of partially paid billing entries."""
+    if fmt.lower() not in _ALLOWED_FMTS:
+        raise HTTPException(status_code=400, detail="fmt must be csv or xlsx")
+    user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
+    _check_access(role)
+    try:
+        content = generate_partially_paid_billing_report(fmt.lower())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    append_new_journal_entry(
+        user=user_id or full_name or role,
+        role=role,
+        action="download_report",
+        entity="report",
+        entity_id="partially_paid_billing",
+        details=f"fmt={fmt.lower()}",
+    )
+    return Response(
+        content=content,
+        media_type=_media_type(fmt.lower()),
+        headers={"Content-Disposition": f"attachment; filename=partially_paid_billing.{fmt.lower()}"},
     )

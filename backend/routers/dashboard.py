@@ -3,12 +3,15 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 
 from backend.services import deals_service, settings_service
 from backend.services.permissions import (
     NO_ACCESS_ROLE,
+    FINANCE_VIEW_ROLES,
+    ALLOWED_ROLES,
     can_see_all_deals,
+    check_role,
 )
 from backend.services.telegram_auth import extract_user_from_init_data
 
@@ -17,17 +20,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
-def _resolve_user(init_data: Optional[str]) -> tuple:
-    """Return (user_id, role, full_name) from Telegram initData."""
-    if not init_data:
-        return "", NO_ACCESS_ROLE, ""
-    user = extract_user_from_init_data(init_data)
-    if not user:
-        return "", NO_ACCESS_ROLE, ""
-    user_id = str(user.get("id", ""))
-    role = settings_service.get_user_role(user_id) if user_id else NO_ACCESS_ROLE
-    full_name = settings_service.get_user_full_name(user_id) if user_id else ""
-    return user_id, role, full_name
+def _resolve_user(
+    init_data: Optional[str], role_header: Optional[str] = None
+) -> tuple:
+    """Return (user_id, role, full_name) from Telegram initData or X-User-Role header."""
+    if init_data:
+        user = extract_user_from_init_data(init_data)
+        if user:
+            user_id = str(user.get("id", ""))
+            role = settings_service.get_user_role(user_id) if user_id else NO_ACCESS_ROLE
+            full_name = settings_service.get_user_full_name(user_id) if user_id else ""
+            return user_id, role, full_name
+
+    if role_header and role_header.strip():
+        role = role_header.strip().lower()
+        if role in ALLOWED_ROLES:
+            return "", role, ""
+
+    return "", NO_ACCESS_ROLE, ""
 
 
 def _safe_float(value) -> float:
@@ -168,9 +178,10 @@ def _build_sales_summary(deals: List[dict]) -> Dict[str, Any]:
 @router.get("", response_model=Dict[str, Any])
 async def dashboard(
     x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     """Return role-aware dashboard payload."""
-    user_id, role, full_name = _resolve_user(x_telegram_init_data)
+    user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
 
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -195,3 +206,153 @@ async def dashboard(
         raise HTTPException(status_code=500, detail="Dashboard data unavailable") from exc
 
     return {"role": role, "full_name": full_name, "data": data}
+
+
+# ---------------------------------------------------------------------------
+# Owner Dashboard helpers
+# ---------------------------------------------------------------------------
+
+_PAID_STATUSES = frozenset({"оплачено", "paid", "оплачен"})
+_OWNER_ACCESS_ROLES = frozenset({"operations_director", "accounting", "admin"})
+
+
+def _filter_deals_by_month(deals: List[dict], month: Optional[str]) -> List[dict]:
+    """Filter deals by month prefix (YYYY-MM) matched against project_start_date or act_date."""
+    if not month:
+        return deals
+    result = []
+    for d in deals:
+        date_val = str(d.get("project_start_date") or d.get("act_date") or "")
+        if date_val.startswith(month):
+            result.append(d)
+    return result
+
+
+def _build_owner_summary(deals: List[dict]) -> Dict[str, Any]:
+    """Build owner-level financial aggregation from deals."""
+    total_with_vat = 0.0
+    total_without_vat = 0.0
+    total_expenses = 0.0
+    total_paid = 0.0
+    client_map: Dict[str, float] = {}
+
+    for d in deals:
+        charged = _safe_float(d.get("charged_with_vat"))
+        no_vat = _safe_float(d.get("amount_without_vat"))
+        paid = _safe_float(d.get("paid"))
+        expenses = (
+            _safe_float(d.get("variable_expense_1"))
+            + _safe_float(d.get("variable_expense_2"))
+            + _safe_float(d.get("general_production_expense"))
+        )
+        total_with_vat += charged
+        total_without_vat += no_vat if no_vat else charged
+        total_expenses += expenses
+        total_paid += paid
+
+        client = d.get("client") or "Неизвестно"
+        client_map[client] = client_map.get(client, 0.0) + charged
+
+    total_debt = max(total_with_vat - total_paid, 0.0)
+    gross_profit = total_with_vat - total_expenses
+
+    top_clients = sorted(
+        [{"client": c, "revenue": r} for c, r in client_map.items()],
+        key=lambda x: x["revenue"],
+        reverse=True,
+    )[:10]
+
+    return {
+        "total_revenue_with_vat": total_with_vat,
+        "total_revenue_without_vat": total_without_vat,
+        "total_expenses": total_expenses,
+        "gross_profit": gross_profit,
+        "total_debt": total_debt,
+        "top_clients": top_clients,
+    }
+
+
+def _build_billing_summary(month: Optional[str]) -> Dict[str, Any]:
+    """Build billing-level summary: paid/unpaid counts and warehouse breakdown."""
+    from backend.services.sheets_service import BILLING_SHEETS
+    from backend.services.billing_service import get_billing_entries
+
+    paid_count = 0
+    unpaid_count = 0
+    warehouse_breakdown: Dict[str, Dict[str, Any]] = {}
+
+    for wh_key in BILLING_SHEETS:
+        try:
+            entries = get_billing_entries(wh_key)
+        except Exception:
+            entries = []
+
+        wh_with_vat = 0.0
+        wh_paid = 0
+        wh_unpaid = 0
+
+        for e in entries:
+            period = str(e.get("period", "")).strip()
+            if month and period and not (period == month or period.startswith(f"{month}-")):
+                continue
+
+            status = str(e.get("payment_status", "")).strip().lower()
+            total = _safe_float(e.get("total_with_vat") or e.get("p1_total_with_penalties"))
+            wh_with_vat += total
+
+            if status in _PAID_STATUSES:
+                paid_count += 1
+                wh_paid += 1
+            else:
+                unpaid_count += 1
+                wh_unpaid += 1
+
+        warehouse_breakdown[wh_key.upper()] = {
+            "total_with_vat": wh_with_vat,
+            "paid_count": wh_paid,
+            "unpaid_count": wh_unpaid,
+        }
+
+    return {
+        "paid_billing_count": paid_count,
+        "unpaid_billing_count": unpaid_count,
+        "warehouse_breakdown": warehouse_breakdown,
+    }
+
+
+@router.get("/owner", response_model=Dict[str, Any])
+async def owner_dashboard(
+    month: Optional[str] = Query(default=None, description="Filter by month (YYYY-MM)"),
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """
+    Aggregated owner-level dashboard.
+
+    Returns financial KPIs from deals and billing sheets, optionally filtered by month.
+    Accessible by: operations_director, accounting, admin.
+    """
+    user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
+
+    if role == NO_ACCESS_ROLE:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not check_role(role, _OWNER_ACCESS_ROLES):
+        raise HTTPException(status_code=403, detail="Access denied: owner dashboard requires director, accounting, or admin role")
+
+    try:
+        all_deals = deals_service.get_all_deals()
+        deals = _filter_deals_by_month(all_deals, month)
+        deals_summary = _build_owner_summary(deals)
+        billing_summary = _build_billing_summary(month)
+    except Exception as exc:
+        logger.error("Owner dashboard error: %s", exc)
+        raise HTTPException(status_code=500, detail="Owner dashboard data unavailable") from exc
+
+    return {
+        "role": role,
+        "full_name": full_name,
+        "month": month,
+        **deals_summary,
+        **billing_summary,
+    }

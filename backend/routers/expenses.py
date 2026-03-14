@@ -16,6 +16,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from backend.models.schemas import ExpenseCreate, ExpenseBulkCreate, ExpenseResponse
 from backend.services import settings_service
 from backend.services.expenses_service import add_expense, add_expenses_bulk, get_expenses
+from backend.services.journal_service import append_new_journal_entry
 from backend.services.permissions import (
     NO_ACCESS_ROLE,
     EXPENSE_ADD_ROLES,
@@ -88,6 +89,14 @@ async def create_expense(
             user=user_id or full_name or role,
             role=role,
         )
+        append_new_journal_entry(
+            user=user_id or full_name or role,
+            role=role,
+            action="create_expense",
+            entity="expense",
+            entity_id=str(result.get("expense_id", "")),
+            details=f"category={expense_data.get('category_level_1', expense_data.get('expense_type', ''))} amount={expense_data.get('amount_with_vat', expense_data.get('amount', ''))}",
+        )
         return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -128,6 +137,14 @@ async def create_expenses_bulk(
 
     try:
         results = add_expenses_bulk(rows=rows_data, user=actor, role=role)
+        append_new_journal_entry(
+            user=actor,
+            role=role,
+            action="bulk_create_expenses",
+            entity="expense",
+            entity_id="bulk",
+            details=f"count={len(results)}",
+        )
         return results
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
