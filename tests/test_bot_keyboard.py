@@ -20,8 +20,7 @@ def patch_settings(monkeypatch):
     """Patch settings.webapp_url before importing keyboards."""
     monkeypatch.setenv("WEBAPP_URL", WEBAPP_URL)
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test_token")
-    monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_JSON", "{}")
-    monkeypatch.setenv("GOOGLE_SHEETS_SPREADSHEET_ID", "test_id")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:password@localhost:5432/test")
 
     # Reload settings and keyboards with the patched env
     import importlib

@@ -21,8 +21,7 @@ if _REPO_ROOT not in sys.path:
 
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test")
 os.environ.setdefault("WEBAPP_URL", "http://localhost")
-os.environ.setdefault("GOOGLE_SERVICE_ACCOUNT_JSON", "{}")
-os.environ.setdefault("GOOGLE_SHEETS_SPREADSHEET_ID", "test")
+os.environ.setdefault("DATABASE_URL", "postgresql://user:password@localhost:5432/test")
 
 
 # ---------------------------------------------------------------------------
