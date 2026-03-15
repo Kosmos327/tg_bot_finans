@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.routers import deals, settings, auth, dashboard, journal
 from backend.routers import billing, expenses, reports, receivables
+from backend.routers import deals_sql, expenses_sql, billing_sql, month_close
 from config.config import settings as app_settings, validate_settings
 
 logging.basicConfig(
@@ -110,6 +111,11 @@ app.include_router(billing.router)
 app.include_router(expenses.router)
 app.include_router(reports.router)
 app.include_router(receivables.router)
+# SQL-function/view based routers (primary write/read layer)
+app.include_router(deals_sql.router)
+app.include_router(expenses_sql.router)
+app.include_router(billing_sql.router)
+app.include_router(month_close.router)
 
 # Serve miniapp static files if directory exists
 _miniapp_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "miniapp")

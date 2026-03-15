@@ -524,3 +524,155 @@ async def download_partially_paid_billing_report(
         media_type=_media_type(fmt.lower()),
         headers={"Content-Disposition": f"attachment; filename=partially_paid_billing.{fmt.lower()}"},
     )
+
+
+# ---------------------------------------------------------------------------
+# New SQL-view-based analytical endpoints
+# ---------------------------------------------------------------------------
+
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.database.database import get_db
+from backend.services.db_exec import read_sql_view
+from backend.services.miniapp_auth_service import (
+    get_user_by_telegram_id as _get_user_by_tid,
+    get_role_code as _get_role_code,
+)
+
+
+async def _resolve_user_db_reports(
+    db: AsyncSession,
+    x_telegram_id: Optional[str],
+) -> tuple:
+    if not x_telegram_id:
+        return None, NO_ACCESS_ROLE, ""
+    try:
+        tid = int(x_telegram_id.strip())
+    except (ValueError, TypeError):
+        return None, NO_ACCESS_ROLE, ""
+    user = await _get_user_by_tid(db, tid)
+    if user is None:
+        return None, NO_ACCESS_ROLE, ""
+    role = await _get_role_code(db, user.role_id)
+    return user.id, role or NO_ACCESS_ROLE, user.full_name
+
+
+_ANALYTICS_ROLES = frozenset({"operations_director", "accounting", "admin"})
+
+
+@router.get("/open-deals")
+async def report_open_deals(
+    db: AsyncSession = Depends(get_db),
+    x_telegram_id: Optional[str] = Header(default=None),
+) -> list:
+    """Return open deals from public.v_open_deals."""
+    user_id, role, _ = await _resolve_user_db_reports(db, x_telegram_id)
+    if role == NO_ACCESS_ROLE:
+        raise HTTPException(status_code=403, detail="Access denied: please login first")
+    if role not in _ANALYTICS_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    try:
+        return await read_sql_view(db, "public.v_open_deals")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/manager-performance")
+async def report_manager_performance(
+    month: Optional[str] = Query(default=None, description="YYYY-MM"),
+    db: AsyncSession = Depends(get_db),
+    x_telegram_id: Optional[str] = Header(default=None),
+) -> list:
+    """Return manager performance from public.v_manager_performance_monthly."""
+    user_id, role, _ = await _resolve_user_db_reports(db, x_telegram_id)
+    if role == NO_ACCESS_ROLE:
+        raise HTTPException(status_code=403, detail="Access denied: please login first")
+    if role not in _ANALYTICS_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    where_parts: list[str] = []
+    params: dict = {}
+    if month:
+        where_parts.append("month = :month")
+        params["month"] = month
+    try:
+        return await read_sql_view(
+            db,
+            "public.v_manager_performance_monthly",
+            where_clause=" AND ".join(where_parts),
+            params=params,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/client-profitability")
+async def report_client_profitability(
+    db: AsyncSession = Depends(get_db),
+    x_telegram_id: Optional[str] = Header(default=None),
+) -> list:
+    """Return client profitability from public.v_client_profitability."""
+    user_id, role, _ = await _resolve_user_db_reports(db, x_telegram_id)
+    if role == NO_ACCESS_ROLE:
+        raise HTTPException(status_code=403, detail="Access denied: please login first")
+    if role not in _ANALYTICS_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    try:
+        return await read_sql_view(db, "public.v_client_profitability")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/warehouse-billing")
+async def report_warehouse_billing(
+    month: Optional[str] = Query(default=None, description="YYYY-MM"),
+    db: AsyncSession = Depends(get_db),
+    x_telegram_id: Optional[str] = Header(default=None),
+) -> list:
+    """Return warehouse billing data from public.v_warehouse_billing_monthly."""
+    user_id, role, _ = await _resolve_user_db_reports(db, x_telegram_id)
+    if role == NO_ACCESS_ROLE:
+        raise HTTPException(status_code=403, detail="Access denied: please login first")
+    if role not in _ANALYTICS_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    where_parts: list[str] = []
+    params: dict = {}
+    if month:
+        where_parts.append("month = :month")
+        params["month"] = month
+    try:
+        return await read_sql_view(
+            db,
+            "public.v_warehouse_billing_monthly",
+            where_clause=" AND ".join(where_parts),
+            params=params,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/expense-structure")
+async def report_expense_structure(
+    month: Optional[str] = Query(default=None, description="YYYY-MM"),
+    db: AsyncSession = Depends(get_db),
+    x_telegram_id: Optional[str] = Header(default=None),
+) -> list:
+    """Return expense structure from public.v_expense_structure_monthly."""
+    user_id, role, _ = await _resolve_user_db_reports(db, x_telegram_id)
+    if role == NO_ACCESS_ROLE:
+        raise HTTPException(status_code=403, detail="Access denied: please login first")
+    if role not in _ANALYTICS_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    where_parts: list[str] = []
+    params: dict = {}
+    if month:
+        where_parts.append("month = :month")
+        params["month"] = month
+    try:
+        return await read_sql_view(
+            db,
+            "public.v_expense_structure_monthly",
+            where_clause=" AND ".join(where_parts),
+            params=params,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

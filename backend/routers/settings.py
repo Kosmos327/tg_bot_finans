@@ -62,6 +62,21 @@ async def get_settings(db: AsyncSession = Depends(get_db)) -> SettingsResponse:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.get("/settings/enriched", response_model=Dict[str, Any])
+async def get_settings_enriched(db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
+    """
+    Load reference data from PostgreSQL, enriched with IDs.
+
+    Returns {id, name} objects for all reference items so that the Mini App
+    can pass IDs to SQL-function-based endpoints.
+    """
+    try:
+        return await settings_service.load_enriched_settings_pg(db)
+    except Exception as exc:
+        logger.error("Error loading enriched settings: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # Clients CRUD
 # ---------------------------------------------------------------------------

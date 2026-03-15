@@ -523,7 +523,65 @@ async def load_all_settings_pg(db) -> dict:
     }
 
 
-async def load_business_directions_pg(db) -> List[str]:
+async def load_enriched_settings_pg(db) -> dict:
+    """
+    Load all reference data from PostgreSQL, enriched with IDs.
+
+    Returns {id, name} objects for each reference item so that the Mini App
+    can pass IDs directly to SQL-function-based API endpoints.
+    """
+    from sqlalchemy import select as sa_select
+    from app.database.models import (
+        DealStatus, BusinessDirection, VatType, Source, Client, Manager, Warehouse,
+    )
+
+    async def _fetch_id_name(model, name_col, order_col):
+        try:
+            result = await db.execute(sa_select(model).order_by(order_col))
+            rows = result.scalars().all()
+            return [{"id": r.id, "name": getattr(r, name_col)} for r in rows if getattr(r, name_col, None)]
+        except Exception as exc:
+            logger.warning("Failed to load %s from DB: %s", model.__tablename__, exc)
+            return []
+
+    statuses = await _fetch_id_name(DealStatus, "name", DealStatus.name)
+    directions = await _fetch_id_name(BusinessDirection, "name", BusinessDirection.name)
+    vat_types = await _fetch_id_name(VatType, "name", VatType.name)
+    sources = await _fetch_id_name(Source, "name", Source.name)
+
+    try:
+        result = await db.execute(sa_select(Client).order_by(Client.client_name))
+        clients = [{"id": c.id, "name": c.client_name} for c in result.scalars().all() if c.client_name]
+    except Exception as exc:
+        logger.warning("Failed to load clients from DB: %s", exc)
+        clients = []
+
+    try:
+        result = await db.execute(sa_select(Manager).order_by(Manager.manager_name))
+        managers = [{"id": m.id, "name": m.manager_name} for m in result.scalars().all() if m.manager_name]
+    except Exception as exc:
+        logger.warning("Failed to load managers from DB: %s", exc)
+        managers = []
+
+    try:
+        result = await db.execute(sa_select(Warehouse).order_by(Warehouse.name))
+        warehouses = [{"id": w.id, "name": w.name, "code": w.code} for w in result.scalars().all()]
+    except Exception as exc:
+        logger.warning("Failed to load warehouses from DB: %s", exc)
+        warehouses = []
+
+    return {
+        "statuses": statuses,
+        "business_directions": directions,
+        "vat_types": vat_types,
+        "sources": sources,
+        "clients": clients,
+        "managers": managers,
+        "warehouses": warehouses,
+    }
+
+
+
     """Return all business directions from PostgreSQL."""
     from sqlalchemy import select as sa_select
     from app.database.models import BusinessDirection
