@@ -107,15 +107,17 @@ app.include_router(settings.router)
 app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(journal.router)
-app.include_router(billing.router)
-app.include_router(expenses.router)
-app.include_router(reports.router)
-app.include_router(receivables.router)
-# SQL-function/view based routers (primary write/read layer)
+# SQL-function/view based routers must be registered BEFORE legacy routers
+# so that /billing/v2/*, /expenses/v2/*, /deals/* are matched first.
 app.include_router(deals_sql.router)
 app.include_router(expenses_sql.router)
 app.include_router(billing_sql.router)
 app.include_router(month_close.router)
+# Legacy routers (DEPRECATED – kept for backward compatibility)
+app.include_router(billing.router)
+app.include_router(expenses.router)
+app.include_router(reports.router)
+app.include_router(receivables.router)
 
 # Serve miniapp static files if directory exists
 _miniapp_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "miniapp")

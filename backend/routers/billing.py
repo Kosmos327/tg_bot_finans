@@ -1,5 +1,17 @@
 """
-billing.py – Billing management endpoints.
+billing.py – DEPRECATED legacy billing endpoints.
+
+DEPRECATED: New code should use the SQL-function-based endpoints in billing_sql.py:
+  GET  /billing/v2        → list billing entries (uses X-Telegram-Id auth)
+  POST /billing/v2/upsert → create/update via public.api_upsert_billing_entry()
+  POST /billing/v2/pay    → record payment via public.api_pay_billing_entry()
+
+Legacy routes are preserved for:
+  - /billing/search  (no v2 equivalent yet)
+  - old p1/p2 format  (billing format=old)
+  - /billing/payment/mark  (deal-level payment; different from /billing/v2/pay)
+
+These will be removed once v2 endpoints cover all use-cases.
 
 Routes
 ------
