@@ -484,6 +484,8 @@ function collectFormDataSql() {
     act_date: getFieldValue('act_date') || null,
     variable_expense_1_without_vat: floatVal('variable_expense_1'),
     variable_expense_2_without_vat: floatVal('variable_expense_2'),
+    // Prefer the general_production_expense field; fall back to production_expense_with_vat
+    // for backward compatibility when the form only has the legacy VAT-inclusive field.
     production_expense_without_vat: floatVal('general_production_expense') || floatVal('production_expense_with_vat'),
     manager_bonus_percent: floatVal('manager_bonus_percent'),
     source_id: intVal('source'),
@@ -2819,7 +2821,7 @@ async function loadArchiveBatches() {
     }
     listEl.innerHTML = data.map(batch => `
       <div class="month-close-batch-item">
-        <span class="batch-period">${escHtml(String(batch.year || ''))}-${escHtml(String(batch.month || ''))}</span>
+        <span class="batch-period">${escHtml(String(batch.year || ''))}-${escHtml(String(batch.month || '').padStart(2, '0'))}</span>
         <span class="batch-status">${escHtml(batch.status || '')}</span>
         <span class="batch-date">${escHtml(batch.created_at || '')}</span>
       </div>

@@ -291,7 +291,11 @@ async def _upsert_app_user_sql(
         )
         row = result.fetchone()
         if row is not None:
-            # Reload the ORM object so callers get a proper AppUser instance
+            # Reload the ORM object so callers get a proper AppUser instance.
+            # The public.upsert_app_user() function is expected to return the
+            # upserted row with an 'id' column (the app_users primary key).
+            # We also check 'user_id' as an alternative column name for resilience
+            # in case the function is redefined with a different output column name.
             mapping = dict(row._mapping)
             user_id = mapping.get("id") or mapping.get("user_id")
             if user_id:

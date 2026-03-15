@@ -251,8 +251,8 @@ class TestUpsertAppUserSql:
 
         async def fake_execute(stmt, params=None):
             result = MagicMock()
-            stmt_str = str(stmt) if not hasattr(stmt, 'text') else stmt.text
-            if "upsert_app_user" in str(stmt_str):
+            stmt_str = str(stmt.text) if hasattr(stmt, 'text') else str(stmt)
+            if "upsert_app_user" in stmt_str:
                 # Simulate SQL function not available
                 from sqlalchemy.exc import DBAPIError
                 raise Exception("SQL function not found")
