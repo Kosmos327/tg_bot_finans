@@ -16,7 +16,6 @@ from backend.services.permissions import (
     can_see_all_deals,
     filter_update_payload,
 )
-from backend.services.sheets_service import SheetsError
 from backend.services.telegram_auth import extract_user_from_init_data
 from backend.services.journal_service import append_journal_entry
 
@@ -158,7 +157,8 @@ async def create_deal(
     )
 
     try:
-        deal_id = deals_service.create_deal(
+        deal_id = await deals_service.create_deal_pg(
+            db=db,
             deal_data=deal.model_dump(),
             telegram_user_id=user_id,
             user_role=role,
@@ -167,9 +167,6 @@ async def create_deal(
         return {"success": True, "deal_id": deal_id}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except SheetsError as exc:
-        logger.error("Sheets error creating deal: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         logger.error("Unexpected error creating deal: %s", exc)
         raise HTTPException(status_code=500, detail="Internal server error") from exc
@@ -188,9 +185,9 @@ async def get_all_deals(
         raise HTTPException(status_code=403, detail="Access denied")
 
     try:
-        return deals_service.get_all_deals()
-    except SheetsError as exc:
-        logger.error("Sheets error fetching all deals: %s", exc)
+        return await deals_service.get_all_deals_pg(db)
+    except Exception as exc:
+        logger.error("Error fetching all deals: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -212,12 +209,12 @@ async def get_user_deals(
 
     try:
         if role == "manager":
-            return deals_service.get_deals_by_user(full_name) if full_name else []
+            return await deals_service.get_deals_by_user_pg(db, full_name) if full_name else []
         if manager:
-            return deals_service.get_deals_by_user(manager)
-        return deals_service.get_all_deals()
-    except SheetsError as exc:
-        logger.error("Sheets error fetching deals: %s", exc)
+            return await deals_service.get_deals_by_user_pg(db, manager)
+        return await deals_service.get_all_deals_pg(db)
+    except Exception as exc:
+        logger.error("Error fetching deals: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -257,9 +254,9 @@ async def get_deals_filtered(
         filters["manager"] = full_name
 
     try:
-        return deals_service.get_deals_filtered(filters)
-    except SheetsError as exc:
-        logger.error("Sheets error filtering deals: %s", exc)
+        return await deals_service.get_deals_filtered_pg(db, filters)
+    except Exception as exc:
+        logger.error("Error filtering deals: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -277,9 +274,9 @@ async def get_deal(
         raise HTTPException(status_code=403, detail="Access denied")
 
     try:
-        deal = deals_service.get_deal_by_id(deal_id)
-    except SheetsError as exc:
-        logger.error("Sheets error fetching deal %s: %s", deal_id, exc)
+        deal = await deals_service.get_deal_by_id_pg(db, deal_id)
+    except Exception as exc:
+        logger.error("Error fetching deal %s: %s", deal_id, exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     if deal is None:
@@ -334,8 +331,8 @@ async def _do_update_deal(
 
     if role == "manager":
         try:
-            deal = deals_service.get_deal_by_id(deal_id)
-        except SheetsError as exc:
+            deal = await deals_service.get_deal_by_id_pg(db, deal_id)
+        except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         if deal is None:
             raise HTTPException(status_code=404, detail="Deal not found")
@@ -351,7 +348,8 @@ async def _do_update_deal(
             raise HTTPException(status_code=403, detail="Access denied")
 
     try:
-        success = deals_service.update_deal(
+        success = await deals_service.update_deal_pg(
+            db=db,
             deal_id=deal_id,
             update_data=update_data,
             telegram_user_id=user_id,
@@ -360,9 +358,6 @@ async def _do_update_deal(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except SheetsError as exc:
-        logger.error("Sheets error updating deal %s: %s", deal_id, exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         logger.error("Unexpected error updating deal %s: %s", deal_id, exc)
         raise HTTPException(status_code=500, detail="Internal server error") from exc

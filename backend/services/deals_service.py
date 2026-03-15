@@ -742,3 +742,424 @@ def _col_index_to_letter(index: int) -> str:
         n, remainder = divmod(n - 1, 26)
         result = chr(65 + remainder) + result
     return result
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQL async implementations
+# ---------------------------------------------------------------------------
+
+
+def _parse_date_str(value: Optional[str]) -> Optional[datetime]:
+    """Parse a date string in common formats to datetime, or return None."""
+    if not value or not str(value).strip():
+        return None
+    s = str(value).strip()
+    # Try non-timezone formats first
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    # Fall back to fromisoformat for ISO 8601 strings with timezone info
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        pass
+    logger.warning("Could not parse date string: %r", s)
+    return None
+
+
+def _deal_orm_to_dict(deal, client_name: str = "", manager_name: str = "") -> dict:
+    """Convert a Deal ORM object to a dict using legacy field names."""
+
+    def _f(v) -> Optional[float]:
+        return float(v) if v is not None else None
+
+    def _d(v) -> Optional[str]:
+        return v.strftime("%Y-%m-%d") if v else None
+
+    return {
+        "deal_id": str(deal.id),
+        "status": deal.status or "",
+        "business_direction": deal.business_direction or "",
+        "client": client_name,
+        "manager": manager_name,
+        "charged_with_vat": _f(deal.amount_with_vat),
+        # vat_type is a legacy string label (e.g. "С НДС") not stored as a column
+        # in the deals table; the numeric breakdown is stored in vat_rate/vat_amount.
+        "vat_type": "",
+        "paid": _f(deal.paid_amount),
+        "vat_rate": _f(deal.vat_rate),
+        "vat_amount": _f(deal.vat_amount),
+        "amount_without_vat": _f(deal.amount_without_vat),
+        "project_start_date": _d(deal.date_start),
+        "project_end_date": _d(deal.date_end),
+        "act_date": _d(deal.act_date),
+        "variable_expense_1": _f(deal.variable_expense_1),
+        "variable_expense_2": _f(deal.variable_expense_2),
+        "general_production_expense": _f(deal.production_expense),
+        "manager_bonus_percent": _f(deal.manager_bonus_pct),
+        "manager_bonus_amount": _f(deal.manager_bonus_amount),
+        "marginal_income": _f(deal.marginal_income),
+        "gross_profit": _f(deal.gross_profit),
+        "source": deal.source or "",
+        "document_link": deal.document_url or "",
+        "comment": deal.comment or "",
+        "remaining_amount": _f(deal.remaining_amount),
+        "created_at": deal.created_at.strftime("%Y-%m-%d %H:%M:%S") if deal.created_at else "",
+    }
+
+
+async def create_deal_pg(
+    db,
+    deal_data: dict,
+    telegram_user_id: str = "",
+    user_role: str = "",
+    full_name: str = "",
+) -> str:
+    """
+    Create a new deal in PostgreSQL.
+
+    Applies role-based field filtering, looks up client/manager by name,
+    maps legacy DealCreate field names to ORM columns, persists the record,
+    and writes a journal log entry.
+
+    Returns the new deal ID as a string.
+    Raises ValueError for validation errors.
+    """
+    from decimal import Decimal
+    from sqlalchemy import select as sa_select
+    from app.database.models import Deal, Client, Manager
+
+    # Apply role-based field filtering
+    deal_data = filter_update_payload(user_role, deal_data) if user_role else dict(deal_data)
+
+    # Managers must be attributed to themselves
+    if user_role == "manager" and full_name:
+        deal_data["manager"] = full_name
+
+    _validate_required_fields(deal_data)
+
+    # Resolve client_id from name
+    client_name = deal_data.get("client", "")
+    client_id = None
+    if client_name:
+        result = await db.execute(
+            sa_select(Client).where(Client.client_name == client_name)
+        )
+        client_obj = result.scalar_one_or_none()
+        if client_obj:
+            client_id = client_obj.id
+
+    # Resolve manager_id from name
+    manager_name = deal_data.get("manager", "")
+    manager_id = None
+    if manager_name:
+        result = await db.execute(
+            sa_select(Manager).where(Manager.manager_name == manager_name)
+        )
+        manager_obj = result.scalar_one_or_none()
+        if manager_obj:
+            manager_id = manager_obj.id
+
+    paid = deal_data.get("paid")
+    amount_with_vat = deal_data.get("charged_with_vat")
+
+    remaining = None
+    if amount_with_vat is not None and paid is not None:
+        try:
+            remaining = Decimal(str(amount_with_vat)) - Decimal(str(paid))
+        except Exception:
+            remaining = None
+
+    deal = Deal(
+        manager_id=manager_id,
+        client_id=client_id,
+        status=deal_data.get("status"),
+        business_direction=deal_data.get("business_direction"),
+        amount_with_vat=amount_with_vat,
+        vat_rate=deal_data.get("vat_rate"),
+        vat_amount=deal_data.get("vat_amount"),
+        amount_without_vat=deal_data.get("amount_without_vat"),
+        paid_amount=paid if paid is not None else Decimal("0"),
+        remaining_amount=remaining,
+        variable_expense_1=deal_data.get("variable_expense_1"),
+        variable_expense_2=deal_data.get("variable_expense_2"),
+        production_expense=deal_data.get("general_production_expense"),
+        manager_bonus_pct=deal_data.get("manager_bonus_percent"),
+        manager_bonus_amount=deal_data.get("manager_bonus_amount"),
+        marginal_income=deal_data.get("marginal_income"),
+        gross_profit=deal_data.get("gross_profit"),
+        source=deal_data.get("source"),
+        document_url=deal_data.get("document_link"),
+        comment=deal_data.get("comment"),
+        date_start=_parse_date_str(deal_data.get("project_start_date")),
+        date_end=_parse_date_str(deal_data.get("project_end_date")),
+        act_date=_parse_date_str(deal_data.get("act_date")),
+    )
+
+    db.add(deal)
+    await db.flush()
+    await db.refresh(deal)
+
+    logger.info(
+        "Created deal id=%s for user %s (role=%s)", deal.id, telegram_user_id, user_role
+    )
+
+    append_journal_entry(
+        telegram_user_id=telegram_user_id,
+        full_name=full_name,
+        user_role=user_role,
+        action="create_deal",
+        deal_id=str(deal.id),
+        payload_summary=(
+            f"client={client_name}, "
+            f"status={deal_data.get('status', '')}, "
+            f"charged_with_vat={deal_data.get('charged_with_vat', '')}"
+        ),
+    )
+
+    return str(deal.id)
+
+
+async def get_deal_by_id_pg(db, deal_id: str) -> Optional[dict]:
+    """Return a single deal as a dict using legacy field names, or None if not found."""
+    from sqlalchemy import select as sa_select
+    from sqlalchemy.orm import selectinload
+    from app.database.models import Deal
+
+    try:
+        deal_pk = int(deal_id)
+    except (ValueError, TypeError):
+        return None
+
+    result = await db.execute(
+        sa_select(Deal)
+        .options(selectinload(Deal.client_obj), selectinload(Deal.manager_obj))
+        .where(Deal.id == deal_pk)
+    )
+    deal = result.scalar_one_or_none()
+    if deal is None:
+        return None
+
+    client_name = deal.client_obj.client_name if deal.client_obj else ""
+    manager_name = deal.manager_obj.manager_name if deal.manager_obj else ""
+    return _deal_orm_to_dict(deal, client_name, manager_name)
+
+
+async def get_all_deals_pg(db) -> List[dict]:
+    """Return all deals as a list of dicts using legacy field names."""
+    from sqlalchemy import select as sa_select
+    from sqlalchemy.orm import selectinload
+    from app.database.models import Deal
+
+    result = await db.execute(
+        sa_select(Deal)
+        .options(selectinload(Deal.client_obj), selectinload(Deal.manager_obj))
+        .order_by(Deal.id.desc())
+    )
+    deals = result.scalars().all()
+
+    output = []
+    for deal in deals:
+        client_name = deal.client_obj.client_name if deal.client_obj else ""
+        manager_name = deal.manager_obj.manager_name if deal.manager_obj else ""
+        output.append(_deal_orm_to_dict(deal, client_name, manager_name))
+    return output
+
+
+async def get_deals_by_user_pg(db, manager_name: str) -> List[dict]:
+    """Return deals belonging to *manager_name*."""
+    return await get_deals_filtered_pg(db, {"manager": manager_name})
+
+
+async def get_deals_filtered_pg(db, filters: dict) -> List[dict]:
+    """
+    Return deals matching *filters* (server-side SQL filtering where practical,
+    Python-side for complex conditions).
+
+    Supported filter keys: manager, client, status, business_direction, month, paid.
+    """
+    from sqlalchemy import select as sa_select
+    from sqlalchemy.orm import selectinload
+    from app.database.models import Deal, Manager, Client
+
+    query = (
+        sa_select(Deal)
+        .options(selectinload(Deal.client_obj), selectinload(Deal.manager_obj))
+        .order_by(Deal.id.desc())
+    )
+
+    # Apply SQL-level filters where possible
+    if filters.get("status"):
+        query = query.where(Deal.status == filters["status"])
+    if filters.get("business_direction"):
+        query = query.where(Deal.business_direction == filters["business_direction"])
+
+    result = await db.execute(query)
+    deals = result.scalars().all()
+
+    # Post-query filtering for name-based and complex conditions
+    output = []
+    for deal in deals:
+        client_name = deal.client_obj.client_name if deal.client_obj else ""
+        manager_name = deal.manager_obj.manager_name if deal.manager_obj else ""
+        deal_dict = _deal_orm_to_dict(deal, client_name, manager_name)
+
+        # Filter by manager name
+        if filters.get("manager") and deal_dict.get("manager") != filters["manager"]:
+            continue
+        # Filter by client name
+        if filters.get("client") and deal_dict.get("client") != filters["client"]:
+            continue
+        # Filter by month (YYYY-MM prefix on project_start_date)
+        if filters.get("month"):
+            start = deal_dict.get("project_start_date") or ""
+            if not start.startswith(str(filters["month"])):
+                continue
+        # Filter by paid flag
+        if filters.get("paid") is not None:
+            paid_val = deal_dict.get("paid") or 0.0
+            if filters["paid"] is True and not paid_val > 0:
+                continue
+            if filters["paid"] is False and paid_val > 0:
+                continue
+
+        output.append(deal_dict)
+
+    return output
+
+
+async def update_deal_pg(
+    db,
+    deal_id: str,
+    update_data: dict,
+    telegram_user_id: str = "",
+    user_role: str = "",
+    full_name: str = "",
+) -> bool:
+    """
+    Update an existing deal in PostgreSQL.
+
+    Applies role-based field filtering, maps legacy field names to ORM columns,
+    and persists only the changed fields.
+
+    Returns True if the deal was found and updated, False if not found.
+    Raises ValueError if no permitted fields remain after filtering.
+    """
+    from decimal import Decimal
+    from sqlalchemy import select as sa_select
+    from app.database.models import Deal, Client, Manager
+
+    # Apply role-based field filtering
+    permitted = filter_update_payload(user_role, update_data) if user_role else dict(update_data)
+    rejected = sorted(set(update_data) - set(permitted))
+
+    if rejected:
+        logger.warning(
+            "Role '%s' attempted to edit forbidden fields %s on deal %s",
+            user_role, rejected, deal_id,
+        )
+        append_journal_entry(
+            telegram_user_id=telegram_user_id,
+            full_name=full_name,
+            user_role=user_role,
+            action="forbidden_edit_attempt",
+            deal_id=deal_id,
+            changed_fields=rejected,
+            payload_summary=f"Rejected fields: {rejected}",
+        )
+
+    # Remove None values — None in DealUpdate means "don't change this field",
+    # not "set to NULL". Callers who need to explicitly clear a field should
+    # pass an appropriate sentinel (e.g. empty string for text fields).
+    permitted = {k: v for k, v in permitted.items() if v is not None}
+
+    if not permitted:
+        raise ValueError(
+            f"No fields in the request are editable by role '{user_role}'. "
+            f"Rejected fields: {rejected}"
+        )
+
+    try:
+        deal_pk = int(deal_id)
+    except (ValueError, TypeError):
+        return False
+
+    result = await db.execute(sa_select(Deal).where(Deal.id == deal_pk))
+    deal = result.scalar_one_or_none()
+    if deal is None:
+        return False
+
+    # Map legacy field names to ORM attributes
+    _FIELD_TO_ORM = {
+        "status": "status",
+        "business_direction": "business_direction",
+        "charged_with_vat": "amount_with_vat",
+        "paid": "paid_amount",
+        "vat_rate": "vat_rate",
+        "vat_amount": "vat_amount",
+        "amount_without_vat": "amount_without_vat",
+        "variable_expense_1": "variable_expense_1",
+        "variable_expense_2": "variable_expense_2",
+        "general_production_expense": "production_expense",
+        "manager_bonus_percent": "manager_bonus_pct",
+        "manager_bonus_amount": "manager_bonus_amount",
+        "marginal_income": "marginal_income",
+        "gross_profit": "gross_profit",
+        "source": "source",
+        "document_link": "document_url",
+        "comment": "comment",
+        "project_start_date": "date_start",
+        "project_end_date": "date_end",
+        "act_date": "act_date",
+    }
+
+    _DATE_ORM_FIELDS = {"date_start", "date_end", "act_date"}
+
+    for field, value in permitted.items():
+        if field == "client":
+            res = await db.execute(
+                sa_select(Client).where(Client.client_name == str(value))
+            )
+            client_obj = res.scalar_one_or_none()
+            deal.client_id = client_obj.id if client_obj else None
+        elif field == "manager":
+            res = await db.execute(
+                sa_select(Manager).where(Manager.manager_name == str(value))
+            )
+            manager_obj = res.scalar_one_or_none()
+            deal.manager_id = manager_obj.id if manager_obj else None
+        elif field in _FIELD_TO_ORM:
+            orm_attr = _FIELD_TO_ORM[field]
+            if orm_attr in _DATE_ORM_FIELDS:
+                setattr(deal, orm_attr, _parse_date_str(str(value)))
+            else:
+                setattr(deal, orm_attr, value)
+
+    # Recalculate remaining_amount when relevant fields change
+    if "charged_with_vat" in permitted or "paid" in permitted:
+        try:
+            awv = deal.amount_with_vat
+            pa = deal.paid_amount
+            if awv is not None and pa is not None:
+                deal.remaining_amount = Decimal(str(awv)) - Decimal(str(pa))
+        except Exception:
+            pass
+
+    await db.flush()
+    await db.refresh(deal)
+
+    logger.info("Updated deal id=%s by user %s", deal_id, telegram_user_id)
+
+    append_journal_entry(
+        telegram_user_id=telegram_user_id,
+        full_name=full_name,
+        user_role=user_role,
+        action="update_deal",
+        deal_id=deal_id,
+        changed_fields=sorted(permitted.keys()),
+        payload_summary=str({k: permitted[k] for k in sorted(permitted)}),
+    )
+
+    return True
