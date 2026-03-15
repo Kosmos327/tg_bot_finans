@@ -3,9 +3,13 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.database import get_db
 from backend.services import deals_service, settings_service
+from backend.services.db_exec import read_sql_view
+from backend.services.miniapp_auth_service import get_user_by_telegram_id, get_role_code
 from backend.services.permissions import (
     NO_ACCESS_ROLE,
     FINANCE_VIEW_ROLES,
@@ -356,3 +360,62 @@ async def owner_dashboard(
         **deals_summary,
         **billing_summary,
     }
+
+
+
+# ---------------------------------------------------------------------------
+# New SQL-view-based dashboard endpoint
+# ---------------------------------------------------------------------------
+
+async def _resolve_user_db(
+    db: AsyncSession,
+    x_telegram_id: Optional[str],
+) -> tuple:
+    """Resolve (user_id, role, full_name) from app_users by X-Telegram-Id."""
+    if not x_telegram_id:
+        return None, NO_ACCESS_ROLE, ""
+    try:
+        tid = int(x_telegram_id.strip())
+    except (ValueError, TypeError):
+        return None, NO_ACCESS_ROLE, ""
+    user = await get_user_by_telegram_id(db, tid)
+    if user is None:
+        return None, NO_ACCESS_ROLE, ""
+    role = await get_role_code(db, user.role_id)
+    return user.id, role or NO_ACCESS_ROLE, user.full_name
+
+
+@router.get("/summary", response_model=List[Dict[str, Any]])
+async def dashboard_summary(
+    month: Optional[str] = Query(default=None, description="Filter by month YYYY-MM"),
+    db: AsyncSession = Depends(get_db),
+    x_telegram_id: Optional[str] = Header(default=None),
+) -> List[Dict[str, Any]]:
+    """
+    Return summary data from public.v_dashboard_summary.
+
+    Accessible by: operations_director, accounting, admin.
+    """
+    user_id, role, full_name = await _resolve_user_db(db, x_telegram_id)
+
+    if role == NO_ACCESS_ROLE:
+        raise HTTPException(status_code=403, detail="Access denied: please login first")
+
+    if role not in ("operations_director", "accounting", "admin"):
+        raise HTTPException(status_code=403, detail="Access denied: insufficient role")
+
+    where_parts: list[str] = []
+    params: dict = {}
+    if month:
+        where_parts.append("month = :month")
+        params["month"] = month
+
+    try:
+        return await read_sql_view(
+            db,
+            "public.v_dashboard_summary",
+            where_clause=" AND ".join(where_parts),
+            params=params,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

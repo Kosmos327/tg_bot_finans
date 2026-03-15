@@ -542,6 +542,41 @@
         </section>
       </div>
 
+      <!-- MONTH CLOSE TAB -->
+      <div id="tab-month-close" class="tab-panel" style="display:none;">
+        <section class="card">
+          <div class="card-header"><span class="section-icon">📅</span><h2>Закрытие месяца</h2></div>
+          <div class="field-group">
+            <div class="field">
+              <label for="month-close-year">Год</label>
+              <div class="input-wrapper"><input type="number" id="month-close-year" min="2020" max="2099" placeholder="2025" /></div>
+            </div>
+            <div class="field">
+              <label for="month-close-month">Месяц (1-12)</label>
+              <div class="input-wrapper"><input type="number" id="month-close-month" min="1" max="12" placeholder="1" /></div>
+            </div>
+            <div class="field">
+              <label for="month-close-comment">Комментарий (для закрытия)</label>
+              <div class="input-wrapper"><input type="text" id="month-close-comment" placeholder="Необязательно..." /></div>
+            </div>
+          </div>
+          <div class="form-actions" style="flex-wrap:wrap;gap:8px;margin-top:12px;">
+            <button class="btn btn-secondary" id="month-close-dry-run-btn">🔍 Dry-run архивирования</button>
+            <button class="btn btn-primary" id="month-close-archive-btn">📦 Архивировать месяц</button>
+            <button class="btn btn-secondary" id="month-close-cleanup-btn">🧹 Очистить staging</button>
+            <button class="btn btn-danger" id="month-close-close-btn">🔒 Закрыть месяц</button>
+          </div>
+          <div id="month-close-result" style="margin-top:12px;"></div>
+        </section>
+        <section class="card" style="margin-top:12px;">
+          <div class="card-header"><span class="section-icon">🗂</span><h2>Архивные батчи</h2></div>
+          <div class="form-actions" style="margin-bottom:8px;">
+            <button class="btn btn-secondary" id="month-close-load-batches-btn">🔄 Загрузить батчи</button>
+          </div>
+          <div id="month-close-batches-list"></div>
+        </section>
+      </div>
+
     </main>
 
     <div id="deal-modal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true">

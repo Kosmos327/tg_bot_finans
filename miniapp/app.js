@@ -111,6 +111,7 @@ async function apiFetch(path, options = {}) {
 // ==========================================
 const state = {
   settings: null,
+  enrichedSettings: null,
   deals: [],
   currentTab: 'new-deal',
   isSubmitting: false,
@@ -168,9 +169,22 @@ function switchTab(tabId) {
 // ==========================================
 async function loadSettings() {
   try {
+    // Try enriched settings first (includes IDs for SQL function endpoints)
+    let enriched = null;
+    try {
+      enriched = await apiFetch('/settings/enriched');
+      state.enrichedSettings = enriched;
+    } catch (_) {
+      // enriched endpoint may not be available in older deployments
+    }
+
     const data = await apiFetch('/settings');
     state.settings = data;
-    populateSelects(data);
+    // Merge warehouse data from enriched settings when available
+    if (enriched && enriched.warehouses) {
+      data.warehouses = enriched.warehouses;
+    }
+    populateSelects(data, enriched);
     updateSettingsStats(data);
     return data;
   } catch (err) {
@@ -186,31 +200,39 @@ async function loadSettings() {
       sources: ['Рекомендация', 'Сайт', 'Реклама', 'Холодный звонок', 'Другое'],
     };
     state.settings = fallback;
-    populateSelects(fallback);
+    populateSelects(fallback, null);
     updateSettingsStats(fallback);
     return fallback;
   }
 }
 
-function populateSelects(data) {
-  fillSelect('status', data.statuses || []);
-  fillSelect('business_direction', data.business_directions || []);
-  fillSelect('client', data.clients || []);
-  fillSelect('manager', data.managers || []);
-  fillSelect('vat_type', data.vat_types || []);
-  fillSelect('source', data.sources || []);
+function populateSelects(data, enriched = null) {
+  // Use enriched (ID-aware) data when available, fall back to plain strings
+  const src = enriched || data;
+  fillSelect('status', src.statuses || data.statuses || []);
+  fillSelect('business_direction', src.business_directions || data.business_directions || []);
+  fillSelect('client', src.clients || data.clients || []);
+  fillSelect('manager', src.managers || data.managers || []);
+  fillSelect('vat_type', src.vat_types || data.vat_types || []);
+  fillSelect('source', src.sources || data.sources || []);
 
   // Billing client dropdown
-  fillSelect('billing-client-select', data.clients || []);
+  fillSelect('billing-client-select', src.clients || data.clients || []);
 
   // Edit deal status dropdown
-  fillSelect('edit-status', data.statuses || []);
+  fillSelect('edit-status', src.statuses || data.statuses || []);
 
   // Filters
-  fillSelect('filter-status', data.statuses || [], true);
-  fillSelect('filter-client', data.clients || [], true);
+  fillSelect('filter-status', src.statuses || data.statuses || [], true);
+  fillSelect('filter-client', src.clients || data.clients || [], true);
 }
 
+/**
+ * Fill a <select> element with options.
+ * Each option can be:
+ *   - a plain string  →  value=string, label=string
+ *   - an object {id, name}  →  value=id, label=name (for SQL function endpoints)
+ */
 function fillSelect(id, options, hasAll = false) {
   const select = document.getElementById(id);
   if (!select) return;
@@ -224,8 +246,15 @@ function fillSelect(id, options, hasAll = false) {
 
   options.forEach(opt => {
     const option = document.createElement('option');
-    option.value = opt;
-    option.textContent = opt;
+    if (opt && typeof opt === 'object' && 'id' in opt) {
+      // Enriched format: store ID as value, show name as label
+      option.value = String(opt.id);
+      option.textContent = opt.name;
+      option.dataset.name = opt.name;
+    } else {
+      option.value = opt;
+      option.textContent = opt;
+    }
     select.appendChild(option);
   });
 
@@ -333,13 +362,20 @@ async function handleFormSubmit(e) {
   setSubmitting(true);
 
   try {
-    const result = await apiFetch('/deal/create', {
+    // Use SQL-function endpoint when enriched settings (IDs) are loaded,
+    // otherwise fall back to the legacy name-based endpoint.
+    const hasIds = state.enrichedSettings && dealData.status_id && dealData.client_id;
+    const endpoint = hasIds ? '/deals/create' : '/deal/create';
+    const payload = hasIds ? collectFormDataSql() : dealData;
+
+    const result = await apiFetch(endpoint, {
       method: 'POST',
-      body: JSON.stringify(dealData),
+      body: JSON.stringify(payload),
     });
 
-    showSuccessScreen(result.deal_id);
-    showToast(`Сделка ${result.deal_id} успешно создана!`, 'success');
+    const dealId = result.deal_id || result.id || result.deal?.id || '—';
+    showSuccessScreen(dealId);
+    showToast(`Сделка ${dealId} успешно создана!`, 'success');
 
     // Invalidate deals cache
     state.deals = [];
@@ -415,6 +451,44 @@ function collectFormData() {
     manager_bonus_paid: floatVal('manager_bonus_paid'),
     general_production_expense: floatVal('general_production_expense'),
     source: getFieldValue('source') || null,
+    document_link: getFieldValue('document_link') || null,
+    comment: getFieldValue('comment') || null,
+  };
+}
+
+/**
+ * Collect deal form data using IDs from enriched settings.
+ * Used when submitting to the SQL-function endpoint /deals/create.
+ */
+function collectFormDataSql() {
+  const intVal = (id) => {
+    const v = getFieldValue(id);
+    return v !== '' ? parseInt(v, 10) : null;
+  };
+  const floatVal = (id) => {
+    const v = getFieldValue(id);
+    return v !== '' ? parseFloat(v) : null;
+  };
+
+  return {
+    status_id: intVal('status'),
+    business_direction_id: intVal('business_direction'),
+    client_id: intVal('client'),
+    manager_id: intVal('manager'),
+    charged_with_vat: floatVal('charged_with_vat'),
+    vat_type_id: intVal('vat_type'),
+    vat_rate: floatVal('vat_rate'),
+    paid: floatVal('paid') || 0,
+    project_start_date: getFieldValue('project_start_date') || null,
+    project_end_date: getFieldValue('project_end_date') || null,
+    act_date: getFieldValue('act_date') || null,
+    variable_expense_1_without_vat: floatVal('variable_expense_1'),
+    variable_expense_2_without_vat: floatVal('variable_expense_2'),
+    // Prefer the general_production_expense field; fall back to production_expense_with_vat
+    // for backward compatibility when the form only has the legacy VAT-inclusive field.
+    production_expense_without_vat: floatVal('general_production_expense') || floatVal('production_expense_with_vat'),
+    manager_bonus_percent: floatVal('manager_bonus_percent'),
+    source_id: intVal('source'),
     document_link: getFieldValue('document_link') || null,
     comment: getFieldValue('comment') || null,
   };
@@ -1315,6 +1389,7 @@ async function init() {
   initDealForm();
   initMyDeals();
   initModal();
+  initMonthClose();
 
   // Check auth before showing any content
   const savedRole = localStorage.getItem('user_role');
@@ -1367,6 +1442,7 @@ const ROLE_TABS = {
     { id: 'tab-expenses',    icon: '📉', label: 'Расходы' },
     { id: 'tab-reports',     icon: '📥', label: 'Отчёты' },
     { id: 'tab-journal',     icon: '📜', label: 'Журнал' },
+    { id: 'tab-month-close', icon: '📅', label: 'Закрытие месяца' },
     { id: 'settings-tab',    icon: '⚙️', label: 'Настройки' },
   ],
   accounting: [
@@ -1386,6 +1462,7 @@ const ROLE_TABS = {
     { id: 'tab-expenses',    icon: '📉', label: 'Расходы' },
     { id: 'tab-reports',     icon: '📥', label: 'Отчёты' },
     { id: 'tab-journal',     icon: '📜', label: 'Журнал' },
+    { id: 'tab-month-close', icon: '📅', label: 'Закрытие месяца' },
     { id: 'settings-tab',    icon: '⚙️', label: 'Настройки' },
   ],
   // Legacy roles
@@ -2620,5 +2697,137 @@ async function loadReceivables() {
     if (loadingEl) loadingEl.style.display = 'none';
     if (emptyEl)   emptyEl.style.display   = 'flex';
     showToast(`Ошибка загрузки задолженности: ${err.message}`, 'error');
+  }
+}
+
+// ==========================================
+// MONTH CLOSE (admin / operations_director)
+// ==========================================
+
+function initMonthClose() {
+  const tab = document.getElementById('tab-month-close');
+  if (!tab) return;
+
+  // Dry-run archive
+  const dryRunBtn = document.getElementById('month-close-dry-run-btn');
+  if (dryRunBtn) dryRunBtn.addEventListener('click', () => runMonthArchive(true));
+
+  // Real archive
+  const archiveBtn = document.getElementById('month-close-archive-btn');
+  if (archiveBtn) archiveBtn.addEventListener('click', () => runMonthArchive(false));
+
+  // Cleanup
+  const cleanupBtn = document.getElementById('month-close-cleanup-btn');
+  if (cleanupBtn) cleanupBtn.addEventListener('click', runMonthCleanup);
+
+  // Close month
+  const closeBtn = document.getElementById('month-close-close-btn');
+  if (closeBtn) closeBtn.addEventListener('click', runMonthClose);
+
+  // Load archive batches
+  const loadBatchesBtn = document.getElementById('month-close-load-batches-btn');
+  if (loadBatchesBtn) loadBatchesBtn.addEventListener('click', loadArchiveBatches);
+}
+
+function _getMonthCloseParams() {
+  const yearInput = document.getElementById('month-close-year');
+  const monthInput = document.getElementById('month-close-month');
+  const year = parseInt(yearInput?.value || new Date().getFullYear(), 10);
+  const month = parseInt(monthInput?.value || (new Date().getMonth() + 1), 10);
+  return { year, month };
+}
+
+function _showMonthCloseResult(resultEl, data, error = null) {
+  if (!resultEl) return;
+  if (error) {
+    resultEl.innerHTML = `<div class="month-close-error">❌ ${escHtml(String(error))}</div>`;
+    return;
+  }
+  if (!data || data.length === 0) {
+    resultEl.innerHTML = '<div class="month-close-ok">✅ Готово (нет данных для отображения)</div>';
+    return;
+  }
+  const rows = data.map(row => {
+    return Object.entries(row).map(([k, v]) =>
+      `<div class="month-close-row"><span class="month-close-key">${escHtml(k)}</span><span class="month-close-val">${escHtml(String(v ?? ''))}</span></div>`
+    ).join('');
+  }).join('<hr>');
+  resultEl.innerHTML = `<div class="month-close-result">${rows}</div>`;
+}
+
+async function runMonthArchive(dryRun) {
+  const { year, month } = _getMonthCloseParams();
+  const resultEl = document.getElementById('month-close-result');
+  if (resultEl) resultEl.innerHTML = '<div class="loading-spinner"></div>';
+  try {
+    const data = await apiFetch('/month/archive', {
+      method: 'POST',
+      body: JSON.stringify({ year, month, dry_run: dryRun }),
+    });
+    _showMonthCloseResult(resultEl, data);
+    showToast(dryRun ? 'Dry-run завершён' : 'Архивирование завершено', 'success');
+  } catch (err) {
+    _showMonthCloseResult(resultEl, null, err.message);
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+async function runMonthCleanup() {
+  const { year, month } = _getMonthCloseParams();
+  const resultEl = document.getElementById('month-close-result');
+  if (resultEl) resultEl.innerHTML = '<div class="loading-spinner"></div>';
+  try {
+    const data = await apiFetch('/month/cleanup', {
+      method: 'POST',
+      body: JSON.stringify({ year, month }),
+    });
+    _showMonthCloseResult(resultEl, data);
+    showToast('Очистка завершена', 'success');
+  } catch (err) {
+    _showMonthCloseResult(resultEl, null, err.message);
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+async function runMonthClose() {
+  const { year, month } = _getMonthCloseParams();
+  const comment = document.getElementById('month-close-comment')?.value?.trim() || null;
+  const resultEl = document.getElementById('month-close-result');
+  if (resultEl) resultEl.innerHTML = '<div class="loading-spinner"></div>';
+  try {
+    const data = await apiFetch('/month/close', {
+      method: 'POST',
+      body: JSON.stringify({ year, month, comment }),
+    });
+    _showMonthCloseResult(resultEl, data);
+    showToast('Месяц закрыт', 'success');
+  } catch (err) {
+    _showMonthCloseResult(resultEl, null, err.message);
+    showToast(`Ошибка: ${err.message}`, 'error');
+  }
+}
+
+async function loadArchiveBatches() {
+  const { year, month } = _getMonthCloseParams();
+  const listEl = document.getElementById('month-close-batches-list');
+  if (listEl) listEl.innerHTML = '<div class="loading-spinner"></div>';
+  try {
+    const params = `?year=${year}&month=${month}`;
+    const data = await apiFetch(`/month/archive-batches${params}`);
+    if (!listEl) return;
+    if (!data || data.length === 0) {
+      listEl.innerHTML = '<p style="color:var(--color-text-secondary)">Нет архивных батчей для выбранного периода</p>';
+      return;
+    }
+    listEl.innerHTML = data.map(batch => `
+      <div class="month-close-batch-item">
+        <span class="batch-period">${escHtml(String(batch.year || ''))}-${escHtml(String(batch.month || '').padStart(2, '0'))}</span>
+        <span class="batch-status">${escHtml(batch.status || '')}</span>
+        <span class="batch-date">${escHtml(batch.created_at || '')}</span>
+      </div>
+    `).join('');
+  } catch (err) {
+    if (listEl) listEl.innerHTML = `<div class="month-close-error">❌ ${escHtml(err.message)}</div>`;
+    showToast(`Ошибка: ${err.message}`, 'error');
   }
 }

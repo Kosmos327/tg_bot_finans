@@ -3,18 +3,18 @@ miniapp_auth_service.py – PostgreSQL-based Mini App authentication service.
 
 Handles:
   - Role validation and password check for miniapp-login
-  - Create or update app_users record on successful login
+  - Create or update app_users record via public.upsert_app_user() SQL function
   - Manager auto-binding when role is 'manager'
   - Resolving the current user by telegram_id on protected endpoints
 
-This service is structured to be upgraded later to full Telegram initData
-validation without changing the caller interface.
+Uses public.upsert_app_user() as the authoritative write path for app_users.
+ORM-based helpers are kept for read-only lookups (get_user_by_telegram_id).
 """
 
 import logging
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import AppUser, Manager, Role
@@ -108,13 +108,13 @@ async def miniapp_login(
         )
         raise PermissionError(f"Invalid password for role '{selected_role}'")
 
-    # Step 3 – upsert app_users
-    app_user = await _upsert_app_user(
+    # Step 3 – upsert app_users via SQL function (authoritative write path)
+    app_user = await _upsert_app_user_sql(
         db,
         telegram_id=telegram_id,
         full_name=full_name,
         username=username,
-        role_id=role_obj.id,
+        role_code=selected_role,
     )
 
     # Step 4 – manager auto-binding
@@ -259,6 +259,68 @@ async def _upsert_app_user(
         )
 
     return user
+
+
+async def _upsert_app_user_sql(
+    db: AsyncSession,
+    telegram_id: int,
+    full_name: str,
+    username: Optional[str],
+    role_code: str,
+) -> AppUser:
+    """
+    Create or update an app_users record via the public.upsert_app_user() SQL function.
+
+    Falls back to the ORM-based _upsert_app_user() if the SQL function is not
+    available (e.g. during tests with a bare schema).
+    Returns the ORM AppUser instance.
+    """
+    try:
+        result = await db.execute(
+            text(
+                "SELECT * FROM public.upsert_app_user("
+                ":p_telegram_id, :p_full_name, :p_username, :p_role_code"
+                ")"
+            ),
+            {
+                "p_telegram_id": telegram_id,
+                "p_full_name": full_name,
+                "p_username": username,
+                "p_role_code": role_code,
+            },
+        )
+        row = result.fetchone()
+        if row is not None:
+            # Reload the ORM object so callers get a proper AppUser instance.
+            # The public.upsert_app_user() function is expected to return the
+            # upserted row with an 'id' column (the app_users primary key).
+            # We also check 'user_id' as an alternative column name for resilience
+            # in case the function is redefined with a different output column name.
+            mapping = dict(row._mapping)
+            user_id = mapping.get("id") or mapping.get("user_id")
+            if user_id:
+                orm_result = await db.execute(
+                    select(AppUser).where(AppUser.id == user_id)
+                )
+                user = orm_result.scalar_one_or_none()
+                if user:
+                    logger.info(
+                        "app_users: upserted via SQL function id=%s telegram_id=%s role=%r",
+                        user.id,
+                        telegram_id,
+                        role_code,
+                    )
+                    return user
+    except Exception as exc:
+        logger.warning(
+            "upsert_app_user SQL function unavailable (%s), falling back to ORM",
+            exc,
+        )
+
+    # Fallback: resolve role_id from ORM and use ORM upsert
+    role_obj = await _get_role_by_code(db, role_code)
+    role_id = role_obj.id if role_obj else 1
+    return await _upsert_app_user(db, telegram_id, full_name, username, role_id)
 
 
 async def _ensure_manager_record(
