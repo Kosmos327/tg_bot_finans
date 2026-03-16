@@ -1641,6 +1641,51 @@ function renderRefList(listId, emptyId, items, itemMapper) {
 }
 
 // ==========================================
+// TELEGRAM AUTO-LOGIN
+// ==========================================
+
+/**
+ * Automatically authenticate with the backend using Telegram initData.
+ *
+ * Runs once per session. If telegram_id is already stored in localStorage,
+ * this function returns immediately (session already authenticated).
+ *
+ * On success: stores telegram_id and user_role in localStorage so that
+ * subsequent API calls include the correct X-Telegram-Id and X-User-Role
+ * headers.
+ *
+ * On failure: shows a toast error and leaves localStorage unchanged so the
+ * app can fall back to the manual auth screen.
+ */
+async function loginWithTelegram() {
+  // Skip if already authenticated in this session (both values must be present)
+  if (localStorage.getItem('telegram_id') && localStorage.getItem('user_role')) {
+    console.log('[loginWithTelegram] telegram_id and user_role already in localStorage – skipping');
+    return;
+  }
+
+  const initData = tg?.initData;
+  if (!initData) {
+    console.warn('[loginWithTelegram] no initData available – skipping');
+    return;
+  }
+
+  try {
+    console.log('[loginWithTelegram] calling /auth/miniapp-login with initData');
+    const result = await apiFetch('/auth/miniapp-login', {
+      method: 'POST',
+      body: JSON.stringify({ init_data: initData }),
+    });
+    localStorage.setItem('telegram_id', String(result.telegram_id));
+    localStorage.setItem('user_role', result.role);
+    console.log('[loginWithTelegram] success: telegram_id=%s role=%s', result.telegram_id, result.role);
+  } catch (err) {
+    console.warn('[loginWithTelegram] failed:', err.message);
+    showToast('Telegram authentication failed', 'error');
+  }
+}
+
+// ==========================================
 // APP INIT
 // ==========================================
 async function init() {
@@ -1650,6 +1695,12 @@ async function init() {
   initMyDeals();
   initModal();
   initMonthClose();
+
+  // Auto-authenticate with backend using Telegram initData when context is
+  // available. Runs once per session; skipped if telegram_id is already stored.
+  if (hasTelegramAuthContext()) {
+    await loginWithTelegram();
+  }
 
   // Check auth before showing any content
   const savedRole = localStorage.getItem('user_role');

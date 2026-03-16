@@ -19,7 +19,7 @@ from backend.services.permissions import (
     ROLE_LABELS_RU,
     verify_role_password,
 )
-from backend.services.miniapp_auth_service import miniapp_login
+from backend.services.miniapp_auth_service import miniapp_login, get_user_by_telegram_id, get_role_code
 from config.config import settings
 
 logger = logging.getLogger(__name__)
@@ -28,16 +28,23 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 # ---------------------------------------------------------------------------
-# Mini App login with telegram_id + role + password
+# Mini App login — supports two modes:
+#   1. Auto-login (init_data only): validates Telegram initData signature and
+#      returns the existing app_users record for the caller. No password needed.
+#   2. Manual login (telegram_id + full_name + selected_role + password):
+#      original flow — creates/updates the app_users record.
 # ---------------------------------------------------------------------------
 
 
 class MiniAppLoginRequest(BaseModel):
-    telegram_id: int
-    full_name: str
+    # Auto-login path: provide only init_data (Telegram WebApp initData string)
+    init_data: Optional[str] = None
+    # Manual login path: all fields below are required when init_data is absent
+    telegram_id: Optional[int] = None
+    full_name: Optional[str] = None
     username: Optional[str] = None
-    selected_role: str
-    password: str
+    selected_role: Optional[str] = None
+    password: Optional[str] = None
 
 
 class MiniAppLoginResponse(BaseModel):
@@ -56,12 +63,86 @@ async def miniapp_login_endpoint(
     """
     Mini App login endpoint.
 
-    Accepts telegram_id, full_name, username, selected_role, and password.
-    Validates the role password, creates or updates the app_users record,
-    and auto-binds a manager record when role is 'manager'.
+    **Auto-login path** (``init_data`` provided):
+    Validates the Telegram WebApp ``initData`` HMAC signature, extracts the
+    Telegram user ID, and returns the existing ``app_users`` record for that
+    user.  No role password is required — the cryptographic signature of the
+    Telegram platform is the authentication proof.  Returns 403 if the
+    signature is invalid or if the user has no ``app_users`` record yet (they
+    must complete the one-time manual registration first).
 
-    Returns user info on success; 403 if the password is wrong.
+    **Manual login path** (``telegram_id`` + ``full_name`` + ``selected_role``
+    + ``password`` provided):
+    Validates the role password, creates or updates the ``app_users`` record,
+    and auto-binds a manager record when role is ``'manager'``.
+
+    Returns user info on success.
     """
+    if body.init_data:
+        # ------------------------------------------------------------------
+        # Auto-login: validate initData signature, look up existing user
+        # ------------------------------------------------------------------
+        logger.info("POST /auth/miniapp-login (auto-login via initData)")
+
+        token = settings.telegram_bot_token
+        is_valid = validate_telegram_init_data(body.init_data, token)
+        if not is_valid:
+            logger.warning("miniapp-login auto-login: invalid initData signature")
+            raise HTTPException(status_code=403, detail="Invalid Telegram initData signature")
+
+        user_dict = extract_user_from_init_data(body.init_data)
+        if not user_dict:
+            logger.warning("miniapp-login auto-login: cannot extract user from initData")
+            raise HTTPException(status_code=403, detail="Cannot extract user from initData")
+
+        telegram_id = user_dict.get("id")
+        if not telegram_id:
+            logger.warning("miniapp-login auto-login: no id field in initData user")
+            raise HTTPException(status_code=403, detail="No telegram_id in initData")
+
+        app_user = await get_user_by_telegram_id(db, int(telegram_id))
+        if app_user is None:
+            logger.info(
+                "miniapp-login auto-login: telegram_id=%s not found in app_users",
+                telegram_id,
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="User not registered. Please log in with your role and password first.",
+            )
+
+        role = await get_role_code(db, app_user.role_id)
+        if role is None:
+            logger.error(
+                "miniapp-login auto-login: role_id=%s not found for app_user_id=%s",
+                app_user.role_id,
+                app_user.id,
+            )
+            raise HTTPException(status_code=500, detail="User role not found")
+
+        logger.info(
+            "miniapp-login auto-login success: telegram_id=%s app_user_id=%s role=%r",
+            telegram_id,
+            app_user.id,
+            role,
+        )
+        return MiniAppLoginResponse(
+            user_id=app_user.id,
+            telegram_id=app_user.telegram_id,
+            full_name=app_user.full_name,
+            username=app_user.username,
+            role=role,
+        )
+
+    # ------------------------------------------------------------------
+    # Manual login: telegram_id + full_name + selected_role + password
+    # ------------------------------------------------------------------
+    if body.telegram_id is None or not body.full_name or not body.selected_role or not body.password:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide either 'init_data' for auto-login, or 'telegram_id', 'full_name', 'selected_role', and 'password' for manual login.",
+        )
+
     logger.info(
         "POST /auth/miniapp-login: telegram_id=%s selected_role=%r",
         body.telegram_id,
