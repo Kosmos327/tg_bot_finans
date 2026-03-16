@@ -294,7 +294,9 @@
         <section class="card">
           <div class="card-header"><span class="section-icon">💳</span><h2>Отметить оплату по сделке</h2></div>
           <div class="field-group">
-            <div class="field"><label for="payment-deal-id">ID сделки</label><input type="text" id="payment-deal-id" placeholder="Введите ID сделки..." /></div>
+            <div class="field"><label for="payment-direction-select">Направление</label><div class="select-wrapper"><select id="payment-direction-select"><option value="">Все направления...</option></select></div></div>
+            <div class="field"><label for="payment-client-select">Клиент</label><div class="select-wrapper"><select id="payment-client-select"><option value="">Все клиенты...</option></select></div></div>
+            <div class="field"><label for="payment-deal-select">Сделка <span class="required">*</span></label><div class="select-wrapper"><select id="payment-deal-select"><option value="">Выберите сделку...</option></select></div></div>
             <div class="field"><label for="payment-amount">Сумма оплаты, ₽</label><div class="input-wrapper"><input type="number" id="payment-amount" placeholder="0.00" min="0" step="0.01" /><span class="input-suffix">₽</span></div></div>
           </div>
           <div class="form-actions"><button class="btn btn-success" id="payment-mark-btn">✅ Отметить оплату</button></div>
@@ -307,7 +309,9 @@
         <section class="card">
           <div class="card-header"><span class="section-icon">📉</span><h2>Добавить расход</h2></div>
           <div class="field-group">
-            <div class="field"><label for="expense-deal-id">ID сделки (необязательно)</label><input type="text" id="expense-deal-id" placeholder="Введите ID сделки..." /></div>
+            <div class="field"><label for="expense-direction-select">Направление (необязательно)</label><div class="select-wrapper"><select id="expense-direction-select"><option value="">Все направления...</option></select></div></div>
+            <div class="field"><label for="expense-client-select">Клиент (необязательно)</label><div class="select-wrapper"><select id="expense-client-select"><option value="">Все клиенты...</option></select></div></div>
+            <div class="field"><label for="expense-deal-select">Сделка (необязательно)</label><div class="select-wrapper"><select id="expense-deal-select"><option value="">Выберите сделку...</option></select></div></div>
             <div class="field"><label for="expense-cat1">Категория 1 <span class="required">*</span></label>
               <div class="select-wrapper"><select id="expense-cat1">
                 <option value="">Выберите категорию...</option>
@@ -366,7 +370,7 @@
             <div class="report-item"><div class="report-icon">💚</div><div class="report-info"><div class="report-title">Оплаченный биллинг</div><div class="report-desc">Billing со статусом "Оплачено"</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="paid-billing" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="paid-billing" data-fmt="xlsx">XLSX</button></div></div>
             <div class="report-item"><div class="report-icon">🔴</div><div class="report-info"><div class="report-title">Неоплаченный биллинг</div><div class="report-desc">Billing без статуса оплаты</div></div><div class="report-actions"><button class="btn btn-sm btn-outline" data-report="unpaid-billing" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="unpaid-billing" data-fmt="xlsx">XLSX</button></div></div>
             <div class="report-item"><div class="report-icon">📅</div><div class="report-info"><div class="report-title">Биллинг по месяцу</div><div class="report-desc">Фильтр по месяцу YYYY-MM</div></div><div class="report-actions"><input type="month" id="report-month" style="font-size:12px;padding:4px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface);" /><button class="btn btn-sm btn-outline" data-report="billing-by-month" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="billing-by-month" data-fmt="xlsx">XLSX</button></div></div>
-            <div class="report-item"><div class="report-icon">🏷️</div><div class="report-info"><div class="report-title">Биллинг по клиенту</div><div class="report-desc">Все склады для клиента</div></div><div class="report-actions"><input type="text" id="report-client-filter" placeholder="Клиент..." style="font-size:12px;padding:4px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface);width:100px;" /><button class="btn btn-sm btn-outline" data-report="billing-by-client" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="billing-by-client" data-fmt="xlsx">XLSX</button></div></div>
+            <div class="report-item"><div class="report-icon">🏷️</div><div class="report-info"><div class="report-title">Биллинг по клиенту</div><div class="report-desc">Все склады для клиента</div></div><div class="report-actions"><div class="select-wrapper" style="display:inline-block;min-width:120px;"><select id="report-client-select" style="font-size:12px;padding:4px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface);"><option value="">Клиент...</option></select></div><button class="btn btn-sm btn-outline" data-report="billing-by-client" data-fmt="csv">CSV</button><button class="btn btn-sm btn-outline" data-report="billing-by-client" data-fmt="xlsx">XLSX</button></div></div>
           </div>
         </section>
       </div>

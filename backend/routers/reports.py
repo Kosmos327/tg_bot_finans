@@ -21,9 +21,11 @@ Each route accepts a ?fmt=csv (default) or ?fmt=xlsx query param.
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.database import get_db
 from backend.services import settings_service
 from backend.services.reports_service import (
     generate_clients_report,
@@ -41,6 +43,22 @@ from backend.services.reports_service import (
     generate_debt_by_warehouse_report,
     generate_overdue_payments_report,
     generate_partially_paid_billing_report,
+    # PostgreSQL-based async generators
+    generate_warehouse_report_pg,
+    generate_clients_report_pg,
+    generate_warehouse_revenue_report_pg,
+    generate_paid_deals_report_pg,
+    generate_unpaid_deals_report_pg,
+    generate_paid_billing_report_pg,
+    generate_unpaid_billing_report_pg,
+    generate_billing_by_month_report_pg,
+    generate_billing_by_client_report_pg,
+    generate_debt_by_client_report_pg,
+    generate_debt_by_warehouse_report_pg,
+    generate_overdue_payments_report_pg,
+    generate_partially_paid_billing_report_pg,
+    generate_expenses_report_pg,
+    generate_profit_report_pg,
 )
 from backend.services.permissions import (
     NO_ACCESS_ROLE,
@@ -102,6 +120,7 @@ def _check_access(role: str) -> None:
 async def download_warehouse_report(
     warehouse: str,
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -115,7 +134,7 @@ async def download_warehouse_report(
     _check_access(role)
 
     try:
-        content = generate_warehouse_report(warehouse.lower(), fmt.lower())
+        content = await generate_warehouse_report_pg(db, warehouse.lower(), fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -138,6 +157,7 @@ async def download_warehouse_report(
 @router.get("/clients")
 async def download_clients_report(
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -149,7 +169,7 @@ async def download_clients_report(
     _check_access(role)
 
     try:
-        content = generate_clients_report(fmt.lower())
+        content = await generate_clients_report_pg(db, fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -172,6 +192,7 @@ async def download_clients_report(
 @router.get("/expenses")
 async def download_expenses_report(
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -183,7 +204,7 @@ async def download_expenses_report(
     _check_access(role)
 
     try:
-        content = generate_expenses_report(fmt.lower())
+        content = await generate_expenses_report_pg(db, fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -206,6 +227,7 @@ async def download_expenses_report(
 @router.get("/profit")
 async def download_profit_report(
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -217,7 +239,7 @@ async def download_profit_report(
     _check_access(role)
 
     try:
-        content = generate_profit_report(fmt.lower())
+        content = await generate_profit_report_pg(db, fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -240,6 +262,7 @@ async def download_profit_report(
 @router.get("/warehouse-revenue")
 async def download_warehouse_revenue_report(
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -255,7 +278,7 @@ async def download_warehouse_revenue_report(
     _check_access(role)
 
     try:
-        content = generate_warehouse_revenue_report(fmt.lower())
+        content = await generate_warehouse_revenue_report_pg(db, fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -270,6 +293,7 @@ async def download_warehouse_revenue_report(
 @router.get("/paid-deals")
 async def download_paid_deals_report(
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -279,7 +303,7 @@ async def download_paid_deals_report(
     _, role, _ = _resolve_user(x_telegram_init_data, x_user_role)
     _check_access(role)
     try:
-        content = generate_paid_deals_report(fmt.lower())
+        content = await generate_paid_deals_report_pg(db, fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return Response(
@@ -292,6 +316,7 @@ async def download_paid_deals_report(
 @router.get("/unpaid-deals")
 async def download_unpaid_deals_report(
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -301,7 +326,7 @@ async def download_unpaid_deals_report(
     _, role, _ = _resolve_user(x_telegram_init_data, x_user_role)
     _check_access(role)
     try:
-        content = generate_unpaid_deals_report(fmt.lower())
+        content = await generate_unpaid_deals_report_pg(db, fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return Response(
@@ -314,6 +339,7 @@ async def download_unpaid_deals_report(
 @router.get("/paid-billing")
 async def download_paid_billing_report(
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -323,7 +349,7 @@ async def download_paid_billing_report(
     _, role, _ = _resolve_user(x_telegram_init_data, x_user_role)
     _check_access(role)
     try:
-        content = generate_paid_billing_report(fmt.lower())
+        content = await generate_paid_billing_report_pg(db, fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return Response(
@@ -336,6 +362,7 @@ async def download_paid_billing_report(
 @router.get("/unpaid-billing")
 async def download_unpaid_billing_report(
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -345,7 +372,7 @@ async def download_unpaid_billing_report(
     _, role, _ = _resolve_user(x_telegram_init_data, x_user_role)
     _check_access(role)
     try:
-        content = generate_unpaid_billing_report(fmt.lower())
+        content = await generate_unpaid_billing_report_pg(db, fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return Response(
@@ -359,6 +386,7 @@ async def download_unpaid_billing_report(
 async def download_billing_by_month_report(
     month: str = Query(..., description="Month in YYYY-MM format"),
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -368,7 +396,7 @@ async def download_billing_by_month_report(
     _, role, _ = _resolve_user(x_telegram_init_data, x_user_role)
     _check_access(role)
     try:
-        content = generate_billing_by_month_report(month=month, fmt=fmt.lower())
+        content = await generate_billing_by_month_report_pg(db, month=month, fmt=fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     safe_month = month.replace("/", "-").replace("..", "")
@@ -383,6 +411,7 @@ async def download_billing_by_month_report(
 async def download_billing_by_client_report(
     client: str = Query(..., description="Client name"),
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -392,7 +421,7 @@ async def download_billing_by_client_report(
     _, role, _ = _resolve_user(x_telegram_init_data, x_user_role)
     _check_access(role)
     try:
-        content = generate_billing_by_client_report(client=client, fmt=fmt.lower())
+        content = await generate_billing_by_client_report_pg(db, client=client, fmt=fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return Response(
@@ -409,6 +438,7 @@ async def download_billing_by_client_report(
 @router.get("/debt-by-client")
 async def download_debt_by_client_report(
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -418,7 +448,7 @@ async def download_debt_by_client_report(
     user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
     _check_access(role)
     try:
-        content = generate_debt_by_client_report(fmt.lower())
+        content = await generate_debt_by_client_report_pg(db, fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     append_new_journal_entry(
@@ -439,6 +469,7 @@ async def download_debt_by_client_report(
 @router.get("/debt-by-warehouse")
 async def download_debt_by_warehouse_report(
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -448,7 +479,7 @@ async def download_debt_by_warehouse_report(
     user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
     _check_access(role)
     try:
-        content = generate_debt_by_warehouse_report(fmt.lower())
+        content = await generate_debt_by_warehouse_report_pg(db, fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     append_new_journal_entry(
@@ -469,6 +500,7 @@ async def download_debt_by_warehouse_report(
 @router.get("/overdue-payments")
 async def download_overdue_payments_report(
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -478,7 +510,7 @@ async def download_overdue_payments_report(
     user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
     _check_access(role)
     try:
-        content = generate_overdue_payments_report(fmt.lower())
+        content = await generate_overdue_payments_report_pg(db, fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     append_new_journal_entry(
@@ -499,6 +531,7 @@ async def download_overdue_payments_report(
 @router.get("/partially-paid-billing")
 async def download_partially_paid_billing_report(
     fmt: str = Query(default="csv"),
+    db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(default=None),
     x_user_role: Optional[str] = Header(default=None),
 ) -> Response:
@@ -508,7 +541,7 @@ async def download_partially_paid_billing_report(
     user_id, role, full_name = _resolve_user(x_telegram_init_data, x_user_role)
     _check_access(role)
     try:
-        content = generate_partially_paid_billing_report(fmt.lower())
+        content = await generate_partially_paid_billing_report_pg(db, fmt.lower())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     append_new_journal_entry(
@@ -530,9 +563,6 @@ async def download_partially_paid_billing_report(
 # New SQL-view-based analytical endpoints
 # ---------------------------------------------------------------------------
 
-from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.database.database import get_db
 from backend.services.db_exec import read_sql_view
 from backend.services.miniapp_auth_service import (
     get_user_by_telegram_id as _get_user_by_tid,

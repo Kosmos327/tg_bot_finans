@@ -64,6 +64,7 @@ async def list_deals(
     manager_id: Optional[int] = None,
     client_id: Optional[int] = None,
     status_id: Optional[int] = None,
+    business_direction_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
 ) -> List[Dict[str, Any]]:
@@ -71,7 +72,8 @@ async def list_deals(
     Return deals from public.v_api_deals.
 
     Managers see only their own deals (filtered by manager_id from app_users).
-    Higher roles can see all deals and optionally filter by manager_id / client_id / status_id.
+    Higher roles can see all deals and optionally filter by manager_id / client_id /
+    status_id / business_direction_id.
     """
     user_id, role, full_name = await _resolve_user(db, x_telegram_id)
 
@@ -101,6 +103,9 @@ async def list_deals(
         if status_id is not None:
             where_parts.append("status_id = :status_id")
             params["status_id"] = status_id
+        if business_direction_id is not None:
+            where_parts.append("business_direction_id = :business_direction_id")
+            params["business_direction_id"] = business_direction_id
 
     where_clause = " AND ".join(where_parts)
 
