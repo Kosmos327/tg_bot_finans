@@ -29,12 +29,19 @@ const tg = window.Telegram?.WebApp;
 let telegramUser = null;
 
 function initTelegram() {
+  console.log('[tg-init] window.Telegram exists:', !!window.Telegram);
+  console.log('[tg-init] Telegram.WebApp exists:', !!window.Telegram?.WebApp);
+
   if (!tg) {
-    console.warn('Telegram WebApp SDK not available');
+    console.warn('[tg-init] Telegram WebApp SDK not available – running outside Telegram');
     return;
   }
+
   tg.ready();
   tg.expand();
+
+  console.log('[tg-init] initData length:', tg.initData ? tg.initData.length : 0);
+  console.log('[tg-init] initDataUnsafe.user exists:', !!tg.initDataUnsafe?.user);
 
   // Apply Telegram color scheme
   if (tg.colorScheme === 'dark') {
@@ -42,6 +49,8 @@ function initTelegram() {
   }
 
   telegramUser = tg.initDataUnsafe?.user || null;
+
+  console.log('[tg-init] telegramUser id:', telegramUser ? telegramUser.id : null);
 
   if (telegramUser) {
     renderUserAvatar(telegramUser);
@@ -82,6 +91,7 @@ function getAuthHeaders() {
   if (telegramId) h['X-Telegram-Id'] = String(telegramId);
   const savedRole = localStorage.getItem('user_role');
   if (savedRole) h['X-User-Role'] = savedRole;
+  console.log('[auth-headers] initData present:', !!initData, '| telegramId:', telegramId || null, '| role:', savedRole || null);
   return h;
 }
 
@@ -1174,14 +1184,22 @@ function initModal() {
 // SETTINGS TAB
 // ==========================================
 async function checkConnections() {
-  // Telegram
-  const isInTelegram = !!tg && !!tg.initData;
-  const isTgAvailable = !!tg;
+  // Telegram: consider WebApp present AND (initData non-empty OR user object available).
+  // initData can be an empty string in certain Telegram contexts even when opened from
+  // within Telegram, so we also check initDataUnsafe.user / telegramUser as fallback.
+  const tgSdkAvailable = !!tg;
+  const hasInitData = !!(tg?.initData);
+  const hasUser = !!(telegramUser || tg?.initDataUnsafe?.user);
+  const isInTelegram    = tgSdkAvailable && (hasInitData || hasUser);
+
+  console.log('[tg-check] SDK available:', tgSdkAvailable, '| initData present:', hasInitData,
+              '| user present:', hasUser, '| isInTelegram:', isInTelegram);
+
   let tgStatus, tgOk;
   if (isInTelegram) {
     tgOk = true;
     tgStatus = 'Подключено';
-  } else if (isTgAvailable) {
+  } else if (tgSdkAvailable) {
     tgOk = false;
     tgStatus = 'Открыто вне Telegram';
   } else {
@@ -1767,6 +1785,8 @@ function initAuthHandlers() {
 
     try {
       let role, roleLabel;
+
+      console.log('[auth] doLogin – selectedRole:', selectedRole, '| authMode:', telegramUser ? 'telegram' : 'role-login');
 
       if (telegramUser) {
         // Primary path: call /auth/miniapp-login to create/update app_users record
