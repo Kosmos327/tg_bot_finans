@@ -1,3 +1,15 @@
+"""
+deals.py – DEPRECATED legacy deal endpoints.
+
+DEPRECATED: These endpoints use the ORM/Sheets-based data path.
+New code should use the SQL-function-based endpoints in deals_sql.py:
+  GET  /deals         → list deals (uses X-Telegram-Id auth)
+  POST /deals/create  → create deal via public.api_create_deal()
+  POST /deals/pay     → pay deal via public.api_pay_deal()
+
+Legacy endpoints preserved for read-only fallback and deal-edit functionality
+until /deals/{id} and PATCH /deals/update/{id} are added to deals_sql.py.
+"""
 import logging
 from typing import Optional
 

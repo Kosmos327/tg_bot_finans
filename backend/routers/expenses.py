@@ -1,5 +1,12 @@
 """
-expenses.py – Expense management endpoints.
+expenses.py – DEPRECATED legacy expense endpoints.
+
+DEPRECATED: New code should use the SQL-function-based endpoints in expenses_sql.py:
+  GET  /expenses/v2        → list expenses (uses X-Telegram-Id auth)
+  POST /expenses/v2/create → create expense via public.api_create_expense()
+
+These legacy routes (/expenses, /expenses/bulk) are no longer called by the
+Mini App and will be removed in a future release.
 
 Routes
 ------

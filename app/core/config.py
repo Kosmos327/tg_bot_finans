@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     webapp_url: str = os.getenv("WEBAPP_URL", "")
     api_base_url: str = os.getenv("API_BASE_URL", "")
 
+    # Deployment environment: 'production', 'staging', 'development', or 'test'.
+    # In production the ORM fallback for upsert_app_user is disabled.
+    app_env: str = os.getenv("APP_ENV", "development")
+
     # Role passwords for Mini App login
     role_password_manager: str = os.getenv("ROLE_PASSWORD_MANAGER", "")
     role_password_operations_director: str = os.getenv("ROLE_PASSWORD_OPERATIONS_DIRECTOR", "")

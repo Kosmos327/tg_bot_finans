@@ -168,29 +168,19 @@ function switchTab(tabId) {
 // SETTINGS LOADER
 // ==========================================
 async function loadSettings() {
+  // /settings/enriched is the single source of truth for all reference data.
+  // It returns {id, name} objects used by SQL-function endpoints.
   try {
-    // Try enriched settings first (includes IDs for SQL function endpoints)
-    let enriched = null;
-    try {
-      enriched = await apiFetch('/settings/enriched');
-      state.enrichedSettings = enriched;
-    } catch (_) {
-      // enriched endpoint may not be available in older deployments
-    }
-
-    const data = await apiFetch('/settings');
-    state.settings = data;
-    // Merge warehouse data from enriched settings when available
-    if (enriched && enriched.warehouses) {
-      data.warehouses = enriched.warehouses;
-    }
-    populateSelects(data, enriched);
-    updateSettingsStats(data);
-    return data;
+    const enriched = await apiFetch('/settings/enriched');
+    state.enrichedSettings = enriched;
+    state.settings = enriched;
+    populateSelects(enriched);
+    updateSettingsStats(enriched);
+    return enriched;
   } catch (err) {
-    console.error('Failed to load settings:', err);
+    console.error('Failed to load enriched settings:', err);
     showToast('Ошибка загрузки справочников. Используются значения по умолчанию.', 'warning');
-    // Use fallback data
+    // Fallback: plain-string lists so the UI stays usable when DB is unreachable.
     const fallback = {
       statuses: ['Новая', 'В работе', 'Завершена', 'Отменена', 'Приостановлена'],
       business_directions: ['ФФ МСК', 'ФФ НСК', 'ФФ ЕКБ', 'ТЛК', 'УТЛ'],
@@ -198,33 +188,42 @@ async function loadSettings() {
       managers: [],
       vat_types: ['С НДС', 'Без НДС'],
       sources: ['Рекомендация', 'Сайт', 'Реклама', 'Холодный звонок', 'Другое'],
+      warehouses: [],
     };
     state.settings = fallback;
-    populateSelects(fallback, null);
+    state.enrichedSettings = null;
+    populateSelects(fallback);
     updateSettingsStats(fallback);
     return fallback;
   }
 }
 
-function populateSelects(data, enriched = null) {
-  // Use enriched (ID-aware) data when available, fall back to plain strings
-  const src = enriched || data;
-  fillSelect('status', src.statuses || data.statuses || []);
-  fillSelect('business_direction', src.business_directions || data.business_directions || []);
-  fillSelect('client', src.clients || data.clients || []);
-  fillSelect('manager', src.managers || data.managers || []);
-  fillSelect('vat_type', src.vat_types || data.vat_types || []);
-  fillSelect('source', src.sources || data.sources || []);
+function populateSelects(data) {
+  // data is the enriched settings object ({id,name} items when available)
+  fillSelect('status', data.statuses || []);
+  fillSelect('business_direction', data.business_directions || []);
+  fillSelect('client', data.clients || []);
+  fillSelect('manager', data.managers || []);
+  fillSelect('vat_type', data.vat_types || []);
+  fillSelect('source', data.sources || []);
 
-  // Billing client dropdown
-  fillSelect('billing-client-select', src.clients || data.clients || []);
+  // Billing client dropdown (uses IDs from enriched data)
+  fillSelect('billing-client-select', data.clients || []);
+
+  // Billing warehouse dropdown – populate from enriched warehouses when available
+  if (data.warehouses && data.warehouses.length > 0) {
+    fillSelect('billing-warehouse', data.warehouses.map(w => ({
+      id: w.id,
+      name: `${(w.code || '').toUpperCase()} — ${w.name}`,
+    })));
+  }
 
   // Edit deal status dropdown
-  fillSelect('edit-status', src.statuses || data.statuses || []);
+  fillSelect('edit-status', data.statuses || []);
 
   // Filters
-  fillSelect('filter-status', src.statuses || data.statuses || [], true);
-  fillSelect('filter-client', src.clients || data.clients || [], true);
+  fillSelect('filter-status', data.statuses || [], true);
+  fillSelect('filter-client', data.clients || [], true);
 }
 
 /**
@@ -357,20 +356,19 @@ async function handleFormSubmit(e) {
     return;
   }
 
-  const dealData = collectFormData();
+  const dealData = collectFormDataSql();
 
   setSubmitting(true);
 
   try {
-    // Use SQL-function endpoint when enriched settings (IDs) are loaded,
-    // otherwise fall back to the legacy name-based endpoint.
-    const hasIds = state.enrichedSettings && dealData.status_id && dealData.client_id;
-    const endpoint = hasIds ? '/deals/create' : '/deal/create';
-    const payload = hasIds ? collectFormDataSql() : dealData;
-
-    const result = await apiFetch(endpoint, {
+    // Always use the SQL-function endpoint /deals/create.
+    // Requires enriched settings to be loaded (IDs, not text values).
+    if (!state.enrichedSettings) {
+      throw new Error('Справочники не загружены. Перезагрузите страницу и попробуйте снова.');
+    }
+    const result = await apiFetch('/deals/create', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(dealData),
     });
 
     const dealId = result.deal_id || result.id || result.deal?.id || '—';
@@ -570,14 +568,11 @@ async function loadDeals() {
   clearDealsList();
 
   try {
-    const manager = telegramUser
-      ? (document.getElementById('filter-manager')?.value || '')
-      : '';
-
     const params = new URLSearchParams();
-    if (manager) params.set('manager', manager);
+    // The /deals endpoint filters by the authenticated user's role automatically.
+    // Optional client/status filters can be passed as query params.
 
-    const deals = await apiFetch(`/deal/user${params.toString() ? '?' + params : ''}`);
+    const deals = await apiFetch(`/deals${params.toString() ? '?' + params : ''}`);
     state.deals = deals;
     renderDeals();
   } catch (err) {
@@ -715,8 +710,7 @@ async function loadDealsForEdit() {
   if (!dealSelect) return;
 
   try {
-    const role = localStorage.getItem('user_role') || '';
-    const deals = await apiFetch('/deal/user', { headers: { 'X-User-Role': role } });
+    const deals = await apiFetch('/deals');
     dealSelect.innerHTML = '<option value="">Выберите сделку...</option>';
     deals.forEach(d => {
       const opt = document.createElement('option');
@@ -1955,11 +1949,11 @@ function clearBillingForm() {
 }
 
 async function saveBilling() {
-  const warehouse = document.getElementById('billing-warehouse')?.value;
-  const clientName = document.getElementById('billing-client-select')?.value?.trim();
+  const warehouseVal = document.getElementById('billing-warehouse')?.value;
+  const clientVal = document.getElementById('billing-client-select')?.value?.trim();
   const fmt = document.getElementById('billing-format')?.value || 'new';
 
-  if (!warehouse || !clientName) {
+  if (!warehouseVal || !clientVal) {
     showToast('Укажите склад и клиента', 'error');
     return;
   }
@@ -1974,6 +1968,44 @@ async function saveBilling() {
     return v ? parseFloat(v) : null;
   };
 
+  // Use /billing/v2/upsert when enriched settings provide warehouse and client IDs.
+  const warehouseId = parseInt(warehouseVal, 10);
+  const clientId = parseInt(clientVal, 10);
+  const useV2 = state.enrichedSettings && !isNaN(warehouseId) && !isNaN(clientId);
+
+  if (useV2 && (fmt === 'new' || fmt === 'new-no-vat')) {
+    // SQL-function path: /billing/v2/upsert
+    const body = {
+      client_id: clientId,
+      warehouse_id: warehouseId,
+      month: month || undefined,
+      period: half || undefined,
+      shipments_with_vat:           pVal('bv2-shipments-with-vat'),
+      units_count:                  pVal('bv2-units') != null ? (parseInt(pVal('bv2-units')) || null) : null,
+      storage_with_vat:             pVal('bv2-storage-with-vat'),
+      pallets_count:                pVal('bv2-pallets') != null ? (parseInt(pVal('bv2-pallets')) || null) : null,
+      returns_pickup_with_vat:      pVal('bv2-returns-pickup-with-vat'),
+      returns_trips_count:          pVal('bv2-returns-trips') != null ? (parseInt(pVal('bv2-returns-trips')) || null) : null,
+      additional_services_with_vat: pVal('bv2-additional-with-vat'),
+      penalties:                    pVal('bv2-penalties'),
+    };
+    Object.keys(body).forEach(k => body[k] == null && delete body[k]);
+    try {
+      await apiFetch('/billing/v2/upsert', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      showToast('Billing сохранён!', 'success');
+    } catch (err) {
+      showToast(`Ошибка: ${err.message}`, 'error');
+    }
+    return;
+  }
+
+  // Legacy path: /billing/{warehouse} (used when warehouse/client have text values
+  // or when the old p1/p2 format is selected)
+  const warehouse = warehouseVal;
+  const clientName = clientVal;
   let body;
 
   if (fmt === 'new' || fmt === 'new-no-vat') {
@@ -1994,7 +2026,6 @@ async function saveBilling() {
       payment_amount:               pVal('bv2-payment-amount'),
       payment_date:                 document.getElementById('bv2-payment-date')?.value || null,
     };
-    // Remove null values
     Object.keys(body).forEach(k => body[k] == null && delete body[k]);
   } else {
     body = {
@@ -2023,6 +2054,7 @@ async function saveBilling() {
   }
 
   try {
+    // DEPRECATED: legacy billing endpoint. Use /billing/v2/upsert when possible.
     const role = localStorage.getItem('user_role') || '';
     await apiFetch(`/billing/${warehouse}`, {
       method: 'POST',
@@ -2265,22 +2297,25 @@ async function saveBulkExpenses() {
       category_level_1: cat1,
       category_level_2: cat2 || undefined,
       comment: comment || undefined,
-      amount_with_vat: amount,
+      amount_without_vat: vatRate ? amount / (1 + vatRate) : amount,
       vat_rate: vatRate || undefined,
-      deal_id: dealId || undefined,
+      deal_id: dealId ? (Number.isFinite(parseInt(dealId, 10)) ? parseInt(dealId, 10) : undefined) : undefined,
     });
   }
 
   if (rows.length === 0) { showToast('Нет строк для сохранения', 'error'); return; }
 
   try {
-    const role = localStorage.getItem('user_role') || '';
-    await apiFetch('/expenses/bulk', {
-      method: 'POST',
-      headers: { 'X-User-Role': role },
-      body: JSON.stringify({ rows }),
-    });
-    showToast(`Сохранено ${rows.length} расходов!`, 'success');
+    // Send each expense row individually to /expenses/v2/create.
+    let saved = 0;
+    for (const row of rows) {
+      await apiFetch('/expenses/v2/create', {
+        method: 'POST',
+        body: JSON.stringify(row),
+      });
+      saved++;
+    }
+    showToast(`Сохранено ${saved} расходов!`, 'success');
     container.innerHTML = '';
     const saveActionsEl = document.getElementById('bulk-save-row');
     if (saveActionsEl) saveActionsEl.style.display = 'none';
@@ -2315,18 +2350,14 @@ async function saveExpense() {
     category_level_1: cat1,
     category_level_2: cat2 || undefined,
     comment: comment || undefined,
-    deal_id: dealId,
-    amount_with_vat: amount,
+    deal_id: dealId ? (Number.isFinite(parseInt(dealId, 10)) ? parseInt(dealId, 10) : undefined) : undefined,
+    amount_without_vat: vatRate ? amount / (1 + vatRate) : amount - vat,
     vat_rate: vatRate || undefined,
-    vat: vat || undefined,
-    amount_without_vat: vatRate ? undefined : amount - vat,
   };
 
   try {
-    const role = localStorage.getItem('user_role') || '';
-    await apiFetch('/expenses', {
+    await apiFetch('/expenses/v2/create', {
       method: 'POST',
-      headers: { 'X-User-Role': role },
       body: JSON.stringify(payload),
     });
     showToast('Расход добавлен!', 'success');
@@ -2360,10 +2391,7 @@ async function loadExpenses() {
   if (emptyEl) emptyEl.style.display = 'none';
 
   try {
-    const role = localStorage.getItem('user_role') || '';
-    const data = await apiFetch('/expenses', {
-      headers: { 'X-User-Role': role },
-    });
+    const data = await apiFetch('/expenses/v2');
 
     if (loadingEl) loadingEl.style.display = 'none';
 
@@ -2757,6 +2785,12 @@ function _showMonthCloseResult(resultEl, data, error = null) {
 
 async function runMonthArchive(dryRun) {
   const { year, month } = _getMonthCloseParams();
+  const monthLabel = `${year}-${String(month).padStart(2, '0')}`;
+
+  if (!dryRun && !confirm(`Архивирование месяца ${monthLabel}.\nЭта операция переносит сделки в архив.\nПродолжить?`)) {
+    return;
+  }
+
   const resultEl = document.getElementById('month-close-result');
   if (resultEl) resultEl.innerHTML = '<div class="loading-spinner"></div>';
   try {
@@ -2774,6 +2808,12 @@ async function runMonthArchive(dryRun) {
 
 async function runMonthCleanup() {
   const { year, month } = _getMonthCloseParams();
+  const monthLabel = `${year}-${String(month).padStart(2, '0')}`;
+
+  if (!confirm(`Очистка месяца ${monthLabel} — это необратимая операция.\nПродолжить?`)) {
+    return;
+  }
+
   const resultEl = document.getElementById('month-close-result');
   if (resultEl) resultEl.innerHTML = '<div class="loading-spinner"></div>';
   try {
@@ -2791,6 +2831,12 @@ async function runMonthCleanup() {
 
 async function runMonthClose() {
   const { year, month } = _getMonthCloseParams();
+  const monthLabel = `${year}-${String(month).padStart(2, '0')}`;
+
+  if (!confirm(`Закрытие месяца ${monthLabel} — это необратимая операция.\nУбедитесь, что dry-run архивирования прошёл успешно.\nПродолжить?`)) {
+    return;
+  }
+
   const comment = document.getElementById('month-close-comment')?.value?.trim() || null;
   const resultEl = document.getElementById('month-close-result');
   if (resultEl) resultEl.innerHTML = '<div class="loading-spinner"></div>';

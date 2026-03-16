@@ -312,9 +312,24 @@ async def _upsert_app_user_sql(
                     )
                     return user
     except Exception as exc:
+        is_prod = getattr(settings, "app_env", "development").lower() == "production"
+        if is_prod:
+            # In production, the SQL function is required. Return a clear error
+            # instead of silently falling back to ORM, which may bypass business rules.
+            logger.error(
+                "upsert_app_user SQL function failed in production (%s). "
+                "Ensure public.upsert_app_user() is deployed on the database.",
+                exc,
+            )
+            raise RuntimeError(
+                "Login unavailable: public.upsert_app_user() SQL function is not accessible. "
+                "Contact your database administrator."
+            ) from exc
         logger.warning(
-            "upsert_app_user SQL function unavailable (%s), falling back to ORM",
+            "upsert_app_user SQL function unavailable (%s), falling back to ORM "
+            "(allowed in %s environment only)",
             exc,
+            getattr(settings, "app_env", "development"),
         )
 
     # Fallback: resolve role_id from ORM and use ORM upsert
