@@ -572,6 +572,30 @@ async def load_enriched_settings_pg(db) -> dict:
         logger.warning("Failed to load warehouses from DB: %s", exc)
         warehouses = []
 
+    try:
+        from app.database.models import ExpenseCategoryLevel1, ExpenseCategoryLevel2
+        from sqlalchemy.orm import selectinload
+        result = await db.execute(
+            sa_select(ExpenseCategoryLevel1)
+            .options(selectinload(ExpenseCategoryLevel1.sub_categories))
+            .order_by(ExpenseCategoryLevel1.name)
+        )
+        cat1_rows = result.scalars().all()
+        expense_categories = [
+            {
+                "id": cat.id,
+                "name": cat.name,
+                "sub_categories": [
+                    {"id": sc.id, "name": sc.name}
+                    for sc in sorted(cat.sub_categories, key=lambda s: s.name)
+                ],
+            }
+            for cat in cat1_rows
+        ]
+    except Exception as exc:
+        logger.warning("Failed to load expense categories from DB: %s", exc)
+        expense_categories = []
+
     return {
         "statuses": statuses,
         "business_directions": directions,
@@ -580,6 +604,7 @@ async def load_enriched_settings_pg(db) -> dict:
         "clients": clients,
         "managers": managers,
         "warehouses": warehouses,
+        "expense_categories": expense_categories,
     }
 
 
