@@ -38,3 +38,11 @@ class BillingPayRequest(BaseModel):
     billing_entry_id: int
     payment_amount: Decimal
     payment_date: Optional[date] = None
+
+
+class BillingPaymentMarkRequest(BaseModel):
+    """Request body for POST /billing/v2/payment/mark → public.api_pay_deal(...)."""
+
+    deal_id: str = Field(..., description="Deal ID (numeric string or deal code)")
+    payment_amount: Decimal
+    payment_date: Optional[date] = None

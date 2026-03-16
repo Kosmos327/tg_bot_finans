@@ -733,8 +733,7 @@ async function onEditDealSelected(dealId) {
   }
 
   try {
-    const role = localStorage.getItem('user_role') || '';
-    const deal = await apiFetch(`/deal/${dealId}`, { headers: { 'X-User-Role': role } });
+    const deal = await apiFetch(`/deals/${dealId}`);
 
     const setVal = (id, val) => {
       const el = document.getElementById(id);
@@ -793,10 +792,8 @@ async function saveEditedDeal() {
   }
 
   try {
-    const role = localStorage.getItem('user_role') || '';
-    await apiFetch(`/deal/update/${dealId}`, {
+    await apiFetch(`/deals/update/${dealId}`, {
       method: 'PATCH',
-      headers: { 'X-User-Role': role },
       body: JSON.stringify(payload),
     });
     showToast(`Сделка ${dealId} обновлена!`, 'success');
@@ -831,7 +828,7 @@ async function openDealModal(dealId) {
 
   if (!deal) {
     try {
-      deal = await apiFetch(`/deal/${dealId}`);
+      deal = await apiFetch(`/deals/${dealId}`);
     } catch (err) {
       showToast(`Ошибка загрузки сделки: ${err.message}`, 'error');
       return;
@@ -1870,11 +1867,37 @@ async function loadBillingEntry() {
   if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Поиск...'; }
 
   try {
-    const role = localStorage.getItem('user_role') || '';
-    let url = `/billing/search?warehouse=${encodeURIComponent(warehouse)}&client=${encodeURIComponent(client)}`;
-    if (month) url += `&month=${encodeURIComponent(month)}`;
-    if (period) url += `&period=${encodeURIComponent(period)}`;
-    const result = await apiFetch(url, { headers: { 'X-User-Role': role } });
+    // Use SQL-first /billing/v2/search when enriched settings provide numeric IDs
+    const warehouseId = parseInt(warehouse, 10);
+    const clientId = parseInt(client, 10);
+    const useV2 = state.enrichedSettings && Number.isFinite(warehouseId) && warehouseId > 0
+                  && Number.isFinite(clientId) && clientId > 0;
+
+    let url;
+    if (useV2) {
+      url = `/billing/v2/search?warehouse_id=${warehouseId}&client_id=${clientId}`;
+      if (month) url += `&month=${encodeURIComponent(month)}`;
+      if (period) url += `&period=${encodeURIComponent(period)}`;
+    } else {
+      // Legacy fallback for text-based warehouse/client values
+      const role = localStorage.getItem('user_role') || '';
+      url = `/billing/search?warehouse=${encodeURIComponent(warehouse)}&client=${encodeURIComponent(client)}`;
+      if (month) url += `&month=${encodeURIComponent(month)}`;
+      if (period) url += `&period=${encodeURIComponent(period)}`;
+      const result = await apiFetch(url, { headers: { 'X-User-Role': role } });
+      if (result.found) {
+        preloadBillingForm(result);
+        if (statusEl) { statusEl.textContent = '✅ Запись найдена и загружена.'; }
+        showToast('Данные billing загружены', 'success');
+      } else {
+        if (statusEl) { statusEl.textContent = 'ℹ️ Запись не найдена. Форма очищена для новой записи.'; }
+        clearBillingForm();
+        showToast('Новая запись — введите данные', 'default');
+      }
+      return;
+    }
+
+    const result = await apiFetch(url);
 
     if (result.found) {
       preloadBillingForm(result);
@@ -2075,10 +2098,8 @@ async function markPayment() {
   if (!amount || amount <= 0) { showToast('Укажите сумму оплаты', 'error'); return; }
 
   try {
-    const role = localStorage.getItem('user_role') || '';
-    const result = await apiFetch('/billing/payment/mark', {
+    const result = await apiFetch('/billing/v2/payment/mark', {
       method: 'POST',
-      headers: { 'X-User-Role': role },
       body: JSON.stringify({ deal_id: dealId, payment_amount: amount }),
     });
     showToast(`Оплата ${formatCurrency(amount)} отмечена. Остаток: ${formatCurrency(result.remaining_amount)}`, 'success');
@@ -2775,12 +2796,35 @@ function _showMonthCloseResult(resultEl, data, error = null) {
     resultEl.innerHTML = '<div class="month-close-ok">✅ Готово (нет данных для отображения)</div>';
     return;
   }
-  const rows = data.map(row => {
-    return Object.entries(row).map(([k, v]) =>
-      `<div class="month-close-row"><span class="month-close-key">${escHtml(k)}</span><span class="month-close-val">${escHtml(String(v ?? ''))}</span></div>`
-    ).join('');
+
+  // Highlight key summary fields prominently
+  const summaryKeys = ['archive_batch_id', 'status', 'total_deals', 'archived_count', 'dry_run'];
+  const summaryItems = [];
+  const detailRows = data.map(row => {
+    return Object.entries(row).map(([k, v]) => {
+      const rowClass = summaryKeys.includes(k)
+        ? 'month-close-row month-close-highlight'
+        : 'month-close-row';
+      return `<div class="${rowClass}"><span class="month-close-key">${escHtml(k)}</span><span class="month-close-val">${escHtml(String(v ?? ''))}</span></div>`;
+    }).join('');
   }).join('<hr>');
-  resultEl.innerHTML = `<div class="month-close-result">${rows}</div>`;
+
+  // Show count summary line if recognisable fields are present
+  const first = data[0] || {};
+  if (first.dry_run !== undefined) {
+    const count = first.total_deals ?? first.archived_count ?? data.length;
+    const isDry = first.dry_run === true || first.dry_run === 'true';
+    summaryItems.push(`${isDry ? '🔍 Dry-run:' : '📦 Архивировано:'} <b>${escHtml(String(count))}</b> записей`);
+  }
+  if (first.archive_batch_id !== undefined) {
+    summaryItems.push(`📋 Batch ID: <b>${escHtml(String(first.archive_batch_id))}</b>`);
+  }
+
+  const summaryHtml = summaryItems.length
+    ? `<div class="month-close-summary">${summaryItems.join(' &nbsp;|&nbsp; ')}</div>`
+    : '';
+
+  resultEl.innerHTML = `${summaryHtml}<div class="month-close-result">${detailRows}</div>`;
 }
 
 async function runMonthArchive(dryRun) {
@@ -2800,6 +2844,10 @@ async function runMonthArchive(dryRun) {
     });
     _showMonthCloseResult(resultEl, data);
     showToast(dryRun ? 'Dry-run завершён' : 'Архивирование завершено', 'success');
+    // After a real archive, refresh the archive batches list automatically
+    if (!dryRun) {
+      setTimeout(loadArchiveBatches, 500);
+    }
   } catch (err) {
     _showMonthCloseResult(resultEl, null, err.message);
     showToast(`Ошибка: ${err.message}`, 'error');
@@ -2823,6 +2871,8 @@ async function runMonthCleanup() {
     });
     _showMonthCloseResult(resultEl, data);
     showToast('Очистка завершена', 'success');
+    // Refresh archive batches after cleanup
+    setTimeout(loadArchiveBatches, 500);
   } catch (err) {
     _showMonthCloseResult(resultEl, null, err.message);
     showToast(`Ошибка: ${err.message}`, 'error');
@@ -2847,6 +2897,8 @@ async function runMonthClose() {
     });
     _showMonthCloseResult(resultEl, data);
     showToast('Месяц закрыт', 'success');
+    // Refresh archive batches after closing the month
+    setTimeout(loadArchiveBatches, 500);
   } catch (err) {
     _showMonthCloseResult(resultEl, null, err.message);
     showToast(`Ошибка: ${err.message}`, 'error');
@@ -2870,6 +2922,7 @@ async function loadArchiveBatches() {
         <span class="batch-period">${escHtml(String(batch.year || ''))}-${escHtml(String(batch.month || '').padStart(2, '0'))}</span>
         <span class="batch-status">${escHtml(batch.status || '')}</span>
         <span class="batch-date">${escHtml(batch.created_at || '')}</span>
+        ${batch.archive_batch_id ? `<span class="batch-id">ID: ${escHtml(String(batch.archive_batch_id))}</span>` : ''}
       </div>
     `).join('');
   } catch (err) {
