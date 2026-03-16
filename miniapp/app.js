@@ -224,6 +224,16 @@ function populateSelects(data) {
   // Filters
   fillSelect('filter-status', data.statuses || [], true);
   fillSelect('filter-client', data.clients || [], true);
+
+  // Dependent dropdowns: direction → client → deals
+  // Billing payment section
+  fillSelect('payment-direction-select', data.business_directions || []);
+  fillSelect('payment-client-select', data.clients || []);
+  // Expenses section
+  fillSelect('expense-direction-select', data.business_directions || []);
+  fillSelect('expense-client-select', data.clients || []);
+  // Reports: billing-by-client
+  fillSelect('report-client-select', data.clients || []);
 }
 
 /**
@@ -259,6 +269,76 @@ function fillSelect(id, options, hasAll = false) {
 
   // Restore previous value if exists
   if (currentValue) select.value = currentValue;
+}
+
+/**
+ * Populate a <select> element with {id, name} objects.
+ * Keeps the first placeholder <option>.
+ */
+function populateSelectFromObjects(selectEl, items) {
+  if (!selectEl) return;
+  const first = selectEl.options[0];
+  selectEl.innerHTML = '';
+  if (first) selectEl.appendChild(first);
+  (items || []).forEach(item => {
+    const o = document.createElement('option');
+    o.value = String(item.id);
+    o.textContent = item.name || item.deal_name || String(item.id);
+    o.dataset.name = item.name || item.deal_name || String(item.id);
+    selectEl.appendChild(o);
+  });
+}
+
+/**
+ * Load deals from /deals filtered by optional direction_id and client_id,
+ * then populate the given <select> element.
+ */
+async function loadDealsFiltered(dealSelectId, directionId, clientId) {
+  const select = document.getElementById(dealSelectId);
+  if (!select) return;
+
+  const params = new URLSearchParams();
+  if (directionId) params.set('business_direction_id', directionId);
+  if (clientId)    params.set('client_id', clientId);
+
+  try {
+    const qs = params.toString();
+    const deals = await apiFetch(`/deals${qs ? '?' + qs : ''}`);
+    const items = (deals || []).map(d => ({
+      id: d.id,
+      name: d.deal_name || d.client || `Сделка #${d.id}`,
+    }));
+    populateSelectFromObjects(select, items);
+  } catch (err) {
+    console.warn('loadDealsFiltered error:', err);
+    populateSelectFromObjects(select, []);
+  }
+}
+
+/**
+ * Init dependent direction→client→deal dropdowns.
+ * @param {string} dirSelectId   ID of direction <select>
+ * @param {string} clientSelectId ID of client <select>
+ * @param {string} dealSelectId  ID of deal <select>
+ */
+function initDependentDealDropdowns(dirSelectId, clientSelectId, dealSelectId) {
+  const dirEl    = document.getElementById(dirSelectId);
+  const clientEl = document.getElementById(clientSelectId);
+  const dealEl   = document.getElementById(dealSelectId);
+  if (!dirEl || !clientEl || !dealEl) return;
+
+  const reload = () => {
+    const dirId    = dirEl.value    || null;
+    const clientId = clientEl.value || null;
+    if (dirId || clientId) {
+      loadDealsFiltered(dealSelectId, dirId, clientId);
+    } else {
+      populateSelectFromObjects(dealEl, []);
+    }
+  };
+
+  dirEl.addEventListener('change', reload);
+  clientEl.addEventListener('change', reload);
 }
 
 function updateSettingsStats(data) {
@@ -1847,6 +1927,9 @@ function initBillingForm() {
   const saveBtn = document.getElementById('billing-save-btn');
   if (saveBtn) saveBtn.addEventListener('click', saveBilling);
 
+  // Mark payment – dependent dropdowns: direction → client → deal
+  initDependentDealDropdowns('payment-direction-select', 'payment-client-select', 'payment-deal-select');
+
   // Mark payment
   const markBtn = document.getElementById('payment-mark-btn');
   if (markBtn) markBtn.addEventListener('click', markPayment);
@@ -2091,10 +2174,12 @@ async function saveBilling() {
 }
 
 async function markPayment() {
-  const dealId = document.getElementById('payment-deal-id')?.value?.trim();
+  // Read deal_id from dropdown (preferred) or fall back to the legacy text input
+  const dealId = document.getElementById('payment-deal-select')?.value?.trim()
+              || document.getElementById('payment-deal-id')?.value?.trim();
   const amount = parseFloat(document.getElementById('payment-amount')?.value || 0);
 
-  if (!dealId) { showToast('Укажите ID сделки', 'error'); return; }
+  if (!dealId) { showToast('Выберите сделку', 'error'); return; }
   if (!amount || amount <= 0) { showToast('Укажите сумму оплаты', 'error'); return; }
 
   try {
@@ -2103,7 +2188,10 @@ async function markPayment() {
       body: JSON.stringify({ deal_id: dealId, payment_amount: amount }),
     });
     showToast(`Оплата ${formatCurrency(amount)} отмечена. Остаток: ${formatCurrency(result.remaining_amount)}`, 'success');
-    document.getElementById('payment-deal-id').value = '';
+    const dealSelectEl = document.getElementById('payment-deal-select');
+    if (dealSelectEl) dealSelectEl.value = '';
+    const dealIdEl = document.getElementById('payment-deal-id');
+    if (dealIdEl) dealIdEl.value = '';
     document.getElementById('payment-amount').value = '';
   } catch (err) {
     showToast(`Ошибка: ${err.message}`, 'error');
@@ -2203,6 +2291,9 @@ function initExpensesForm() {
   if (amountEl) amountEl.addEventListener('input', updateCalc);
   if (vatRateEl) vatRateEl.addEventListener('input', updateCalc);
   if (vatEl) vatEl.addEventListener('input', updateCalc);
+
+  // Dependent deal dropdowns: direction → client → deal
+  initDependentDealDropdowns('expense-direction-select', 'expense-client-select', 'expense-deal-select');
 
   // Save single expense
   const saveBtn = document.getElementById('expense-save-btn');
@@ -2363,7 +2454,10 @@ async function saveExpense() {
     return;
   }
 
-  const dealId = document.getElementById('expense-deal-id')?.value?.trim() || null;
+  // Read deal_id from dropdown (preferred) or fall back to legacy text input
+  const dealId = document.getElementById('expense-deal-select')?.value?.trim()
+              || document.getElementById('expense-deal-id')?.value?.trim()
+              || null;
   const vatRate = parseFloat(document.getElementById('expense-vat-rate')?.value || 0) || 0;
   const vat = parseFloat(document.getElementById('expense-vat')?.value || 0) || 0;
 
@@ -2477,9 +2571,15 @@ async function downloadReport(reportType, fmt) {
     if (!month) { showToast('Выберите месяц для отчёта', 'error'); return; }
     url = `/reports/billing-by-month?month=${encodeURIComponent(month)}&fmt=${fmt}`;
   } else if (reportType === 'billing-by-client') {
-    const client = document.getElementById('report-client-filter')?.value?.trim() || '';
-    if (!client) { showToast('Укажите имя клиента', 'error'); return; }
-    url = `/reports/billing-by-client?client=${encodeURIComponent(client)}&fmt=${fmt}`;
+    // Prefer select dropdown (report-client-select), fall back to legacy text input
+    const clientSelectEl = document.getElementById('report-client-select');
+    const clientTextEl = document.getElementById('report-client-filter');
+    const clientName = (clientSelectEl?.options[clientSelectEl.selectedIndex]?.dataset?.name)
+                    || clientSelectEl?.options[clientSelectEl?.selectedIndex]?.textContent?.trim()
+                    || clientTextEl?.value?.trim()
+                    || '';
+    if (!clientName) { showToast('Выберите клиента', 'error'); return; }
+    url = `/reports/billing-by-client?client=${encodeURIComponent(clientName)}&fmt=${fmt}`;
   } else {
     url = `/reports/${reportType}?fmt=${fmt}`;
   }
@@ -2581,25 +2681,50 @@ async function loadOwnerDashboard() {
   try {
     const month = document.getElementById('dashboard-month-filter')?.value || '';
     const qs = month ? `?month=${encodeURIComponent(month)}` : '';
-    const role = localStorage.getItem('user_role') || '';
-    const data = await apiFetch(`/dashboard/owner${qs}`, {
-      headers: { 'X-User-Role': role },
-    });
+    const rows = await apiFetch(`/dashboard/summary${qs}`);
 
     if (loadingEl) loadingEl.style.display = 'none';
-    if (!data) { if (emptyEl) emptyEl.style.display = 'flex'; return; }
+    if (!rows || rows.length === 0) { if (emptyEl) emptyEl.style.display = 'flex'; return; }
+
+    // Aggregate summary rows into KPI totals
+    let totalRevWithVat = 0, totalRevNoVat = 0, totalExpenses = 0, totalGross = 0, totalDebt = 0;
+    let paidBilling = 0, unpaidBilling = 0;
+    const whMap = {};
+    const clientMap = {};
+
+    rows.forEach(r => {
+      totalRevWithVat  += parseFloat(r.total_revenue_with_vat  || r.charged_with_vat  || 0);
+      totalRevNoVat    += parseFloat(r.total_revenue_without_vat || r.amount_without_vat || 0);
+      totalExpenses    += parseFloat(r.total_expenses   || 0);
+      totalGross       += parseFloat(r.gross_profit     || 0);
+      totalDebt        += parseFloat(r.total_debt       || r.debt || 0);
+      paidBilling      += parseInt(r.paid_billing_count  || 0, 10);
+      unpaidBilling    += parseInt(r.unpaid_billing_count || 0, 10);
+
+      if (r.warehouse || r.warehouse_code) {
+        const wh = r.warehouse || r.warehouse_code;
+        if (!whMap[wh]) whMap[wh] = { total_with_vat: 0, paid_count: 0, unpaid_count: 0 };
+        whMap[wh].total_with_vat += parseFloat(r.billing_total_with_vat || r.total_with_vat || 0);
+        whMap[wh].paid_count     += parseInt(r.paid_count  || 0, 10);
+        whMap[wh].unpaid_count   += parseInt(r.unpaid_count || 0, 10);
+      }
+
+      if (r.client) {
+        clientMap[r.client] = (clientMap[r.client] || 0) + parseFloat(r.total_revenue_with_vat || r.charged_with_vat || 0);
+      }
+    });
 
     // KPI cards
     const kpisEl = document.getElementById('dashboard-kpis');
     if (kpisEl) {
       kpisEl.innerHTML = [
-        { label: 'Выручка с НДС',    value: formatCurrency(data.total_revenue_with_vat || 0),    icon: '💰' },
-        { label: 'Выручка без НДС',  value: formatCurrency(data.total_revenue_without_vat || 0), icon: '💵' },
-        { label: 'Расходы',          value: formatCurrency(data.total_expenses || 0),             icon: '📉' },
-        { label: 'Валовая прибыль',  value: formatCurrency(data.gross_profit || 0),               icon: '📈' },
-        { label: 'Долг',             value: formatCurrency(data.total_debt || 0),                 icon: '⚠️' },
-        { label: 'Оплачено (billing)',   value: String(data.paid_billing_count || 0),             icon: '✅' },
-        { label: 'Не оплачено (billing)', value: String(data.unpaid_billing_count || 0),          icon: '🔴' },
+        { label: 'Выручка с НДС',    value: formatCurrency(totalRevWithVat),  icon: '💰' },
+        { label: 'Выручка без НДС',  value: formatCurrency(totalRevNoVat),    icon: '💵' },
+        { label: 'Расходы',          value: formatCurrency(totalExpenses),     icon: '📉' },
+        { label: 'Валовая прибыль',  value: formatCurrency(totalGross),        icon: '📈' },
+        { label: 'Долг',             value: formatCurrency(totalDebt),         icon: '⚠️' },
+        { label: 'Оплачено (billing)',    value: String(paidBilling),   icon: '✅' },
+        { label: 'Не оплачено (billing)', value: String(unpaidBilling), icon: '🔴' },
       ].map(k => `
         <div class="kpi-card">
           <div class="kpi-icon">${k.icon}</div>
@@ -2611,8 +2736,8 @@ async function loadOwnerDashboard() {
 
     // Warehouse breakdown
     const whEl = document.getElementById('dashboard-warehouse-list');
-    if (whEl && data.warehouse_breakdown) {
-      whEl.innerHTML = Object.entries(data.warehouse_breakdown).map(([wh, info]) => `
+    if (whEl && Object.keys(whMap).length > 0) {
+      whEl.innerHTML = Object.entries(whMap).map(([wh, info]) => `
         <div class="receivables-row">
           <span class="receivables-label">${escHtml(wh)}</span>
           <span class="receivables-amount">${formatCurrency(info.total_with_vat || 0)}</span>
@@ -2621,14 +2746,17 @@ async function loadOwnerDashboard() {
       `).join('');
     }
 
-    // Top clients
+    // Top clients (sorted by revenue desc, top 10)
     const clientsEl = document.getElementById('dashboard-clients-list');
-    if (clientsEl && data.top_clients) {
-      clientsEl.innerHTML = data.top_clients.map((c, i) => `
+    if (clientsEl && Object.keys(clientMap).length > 0) {
+      const topClients = Object.entries(clientMap)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10);
+      clientsEl.innerHTML = topClients.map(([client, revenue], i) => `
         <div class="receivables-row">
           <span class="receivables-rank">#${i + 1}</span>
-          <span class="receivables-label">${escHtml(c.client || '—')}</span>
-          <span class="receivables-amount">${formatCurrency(c.revenue || 0)}</span>
+          <span class="receivables-label">${escHtml(client || '—')}</span>
+          <span class="receivables-amount">${formatCurrency(revenue || 0)}</span>
         </div>
       `).join('');
     }

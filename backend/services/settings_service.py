@@ -547,6 +547,8 @@ async def load_enriched_settings_pg(db) -> dict:
     statuses = await _fetch_id_name(DealStatus, "name", DealStatus.name)
     directions = await _fetch_id_name(BusinessDirection, "name", BusinessDirection.name)
     vat_types = await _fetch_id_name(VatType, "name", VatType.name)
+    if not vat_types:
+        vat_types = [{"id": 1, "name": "С НДС"}, {"id": 2, "name": "Без НДС"}]
     sources = await _fetch_id_name(Source, "name", Source.name)
 
     try:
