@@ -108,20 +108,6 @@ async function apiFetch(path, options = {}) {
       }
     } catch (_) {}
 
-    // Global 403 "please login first" handler: if we are inside Telegram and have a
-    // stored telegram_id, the app_users record may be missing/stale.
-    // Force re-authentication so that /auth/miniapp-login recreates the record.
-    if (response.status === 403
-        && telegramUser
-        && localStorage.getItem('telegram_id')
-        && errorDetail.includes('please login first')) {
-      console.warn('[apiFetch] 403 please-login-first detected – clearing credentials and forcing re-auth');
-      localStorage.removeItem('user_role');
-      localStorage.removeItem('user_role_label');
-      localStorage.removeItem('telegram_id');
-      setTimeout(() => showAuthScreen(), 0);
-    }
-
     throw new Error(errorDetail);
   }
 
@@ -519,21 +505,34 @@ function initDealForm() {
 }
 
 function updateSummary() {
-  const client = getFieldValue('client');
+  const clientId = getFieldValue('client');
   const amount = getFieldValue('charged_with_vat');
-  const status = getFieldValue('status');
-  const manager = getFieldValue('manager');
+  const statusId = getFieldValue('status');
+  const managerId = getFieldValue('manager');
 
   const summaryCard = document.getElementById('deal-summary');
   if (!summaryCard) return;
 
-  const hasData = client || amount || status || manager;
+  const hasData = clientId || amount || statusId || managerId;
   summaryCard.style.display = hasData ? 'block' : 'none';
 
-  setEl('sum-client', client || '—');
+  // Resolve human-readable labels from normalized settings when IDs are stored in selects.
+  const ns = state.enrichedSettings;
+  const labelById = (items, id) => {
+    if (!id) return '—';
+    if (ns) {
+      const found = (items || []).find(x => String(x.id) === String(id));
+      if (found) return found.name;
+    }
+    // Fallback: try to read the option text directly from the select element
+    const el = document.querySelector(`select option[value="${id}"]`);
+    return (el && el.textContent) ? el.textContent : String(id);
+  };
+
+  setEl('sum-client', labelById(ns?.clients, clientId));
   setEl('sum-amount', amount ? formatCurrency(parseFloat(amount)) : '—');
-  setEl('sum-status', status || '—');
-  setEl('sum-manager', manager || '—');
+  setEl('sum-status', labelById(ns?.statuses, statusId));
+  setEl('sum-manager', labelById(ns?.managers, managerId));
 }
 
 async function handleFormSubmit(e) {
@@ -2248,19 +2247,29 @@ async function saveBilling() {
 
   if (useV2 && (fmt === 'new' || fmt === 'new-no-vat')) {
     // SQL-function path: /billing/v2/upsert
+    // For 'new' format: entered values are with-VAT → send to *_with_vat fields.
+    // For 'new-no-vat' format: entered values are without-VAT → send to *_without_vat fields.
+    // Note: the HTML input IDs use the "-with-vat" suffix as a legacy naming convention;
+    // updateBillingInputLabels() changes the visible labels dynamically based on the format.
+    const isNoVat = (fmt === 'new-no-vat');
+    const amtVal = (id) => pVal(id); // amount entered by user; VAT direction depends on isNoVat
     const body = {
       client_id: clientId,
       warehouse_id: warehouseId,
       month,
       period: half || undefined,
-      shipments_with_vat:           pVal('bv2-shipments-with-vat'),
-      units_count:                  pVal('bv2-units') != null ? (parseInt(pVal('bv2-units')) || null) : null,
-      storage_with_vat:             pVal('bv2-storage-with-vat'),
-      pallets_count:                pVal('bv2-pallets') != null ? (parseInt(pVal('bv2-pallets')) || null) : null,
-      returns_pickup_with_vat:      pVal('bv2-returns-pickup-with-vat'),
-      returns_trips_count:          pVal('bv2-returns-trips') != null ? (parseInt(pVal('bv2-returns-trips')) || null) : null,
-      additional_services_with_vat: pVal('bv2-additional-with-vat'),
-      penalties:                    pVal('bv2-penalties'),
+      shipments_with_vat:              isNoVat ? null : amtVal('bv2-shipments-with-vat'),
+      shipments_without_vat:           isNoVat ? amtVal('bv2-shipments-with-vat') : null,
+      units_count:                     pVal('bv2-units') != null ? (parseInt(pVal('bv2-units')) || null) : null,
+      storage_with_vat:                isNoVat ? null : amtVal('bv2-storage-with-vat'),
+      storage_without_vat:             isNoVat ? amtVal('bv2-storage-with-vat') : null,
+      pallets_count:                   pVal('bv2-pallets') != null ? (parseInt(pVal('bv2-pallets')) || null) : null,
+      returns_pickup_with_vat:         isNoVat ? null : amtVal('bv2-returns-pickup-with-vat'),
+      returns_pickup_without_vat:      isNoVat ? amtVal('bv2-returns-pickup-with-vat') : null,
+      returns_trips_count:             pVal('bv2-returns-trips') != null ? (parseInt(pVal('bv2-returns-trips')) || null) : null,
+      additional_services_with_vat:    isNoVat ? null : amtVal('bv2-additional-with-vat'),
+      additional_services_without_vat: isNoVat ? amtVal('bv2-additional-with-vat') : null,
+      penalties:                       pVal('bv2-penalties'),
     };
     Object.keys(body).forEach(k => body[k] == null && delete body[k]);
     console.log('[billing] v2/upsert payload:', JSON.stringify(body));
@@ -2955,74 +2964,38 @@ async function loadOwnerDashboard() {
     const month = document.getElementById('dashboard-month-filter')?.value || '';
     const qs = month ? `?month=${encodeURIComponent(month)}` : '';
 
-    // /dashboard/summary uses app_users DB auth (X-Telegram-Id required).
-    // /dashboard/owner uses legacy init-data/role auth (works for role-login users).
-    const hasTelegramId = !!(telegramUser?.id || localStorage.getItem('telegram_id'));
-
     let totalRevWithVat = 0, totalRevNoVat = 0, totalExpenses = 0, totalGross = 0, totalDebt = 0;
     let paidBilling = 0, unpaidBilling = 0;
     const whMap = {};
     const clientMap = {};
 
-    if (hasTelegramId) {
-      console.log('[dashboard] /dashboard/summary (X-Telegram-Id)', qs || '(no filter)');
-      const rows = await apiFetch(`/dashboard/summary${qs}`);
+    console.log('[dashboard] /dashboard/summary', qs || '(no filter)');
+    const rows = await apiFetch(`/dashboard/summary${qs}`);
 
-      if (loadingEl) loadingEl.style.display = 'none';
-      if (!rows || rows.length === 0) { if (emptyEl) emptyEl.style.display = 'flex'; return; }
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (!rows || rows.length === 0) { if (emptyEl) emptyEl.style.display = 'flex'; return; }
 
-      rows.forEach(r => {
-        totalRevWithVat  += parseFloat(r.total_revenue_with_vat  || r.charged_with_vat  || 0);
-        totalRevNoVat    += parseFloat(r.total_revenue_without_vat || r.amount_without_vat || 0);
-        totalExpenses    += parseFloat(r.total_expenses   || 0);
-        totalGross       += parseFloat(r.gross_profit     || 0);
-        totalDebt        += parseFloat(r.total_debt       || r.debt || 0);
-        paidBilling      += parseInt(r.paid_billing_count  || 0, 10);
-        unpaidBilling    += parseInt(r.unpaid_billing_count || 0, 10);
+    rows.forEach(r => {
+      totalRevWithVat  += parseFloat(r.total_revenue_with_vat  || r.charged_with_vat  || 0);
+      totalRevNoVat    += parseFloat(r.total_revenue_without_vat || r.amount_without_vat || 0);
+      totalExpenses    += parseFloat(r.total_expenses   || 0);
+      totalGross       += parseFloat(r.gross_profit     || 0);
+      totalDebt        += parseFloat(r.total_debt       || r.debt || 0);
+      paidBilling      += parseInt(r.paid_billing_count  || 0, 10);
+      unpaidBilling    += parseInt(r.unpaid_billing_count || 0, 10);
 
-        if (r.warehouse || r.warehouse_code) {
-          const wh = r.warehouse || r.warehouse_code;
-          if (!whMap[wh]) whMap[wh] = { total_with_vat: 0, paid_count: 0, unpaid_count: 0 };
-          whMap[wh].total_with_vat += parseFloat(r.billing_total_with_vat || r.total_with_vat || 0);
-          whMap[wh].paid_count     += parseInt(r.paid_count  || 0, 10);
-          whMap[wh].unpaid_count   += parseInt(r.unpaid_count || 0, 10);
-        }
-
-        if (r.client) {
-          clientMap[r.client] = (clientMap[r.client] || 0) + parseFloat(r.total_revenue_with_vat || r.charged_with_vat || 0);
-        }
-      });
-    } else {
-      console.log('[dashboard] /dashboard/owner (role-login fallback)', qs || '(no filter)');
-      const d = await apiFetch(`/dashboard/owner${qs}`);
-
-      if (loadingEl) loadingEl.style.display = 'none';
-      if (!d || Object.keys(d).length === 0) { if (emptyEl) emptyEl.style.display = 'flex'; return; }
-
-      totalRevWithVat = parseFloat(d.total_revenue_with_vat  || 0);
-      totalRevNoVat   = parseFloat(d.total_revenue_without_vat || 0);
-      totalExpenses   = parseFloat(d.total_expenses   || 0);
-      totalGross      = parseFloat(d.gross_profit     || 0);
-      totalDebt       = parseFloat(d.total_debt       || 0);
-      paidBilling     = parseInt(d.paid_billing_count  || 0, 10);
-      unpaidBilling   = parseInt(d.unpaid_billing_count || 0, 10);
-
-      if (d.warehouse_breakdown) {
-        Object.entries(d.warehouse_breakdown).forEach(([wh, info]) => {
-          whMap[wh] = {
-            total_with_vat: parseFloat(info.total_with_vat || 0),
-            paid_count:  parseInt(info.paid_count  || 0, 10),
-            unpaid_count: parseInt(info.unpaid_count || 0, 10),
-          };
-        });
+      if (r.warehouse || r.warehouse_code) {
+        const wh = r.warehouse || r.warehouse_code;
+        if (!whMap[wh]) whMap[wh] = { total_with_vat: 0, paid_count: 0, unpaid_count: 0 };
+        whMap[wh].total_with_vat += parseFloat(r.billing_total_with_vat || r.total_with_vat || 0);
+        whMap[wh].paid_count     += parseInt(r.paid_count  || 0, 10);
+        whMap[wh].unpaid_count   += parseInt(r.unpaid_count || 0, 10);
       }
 
-      if (d.top_clients) {
-        d.top_clients.forEach(item => {
-          if (item.client) clientMap[item.client] = parseFloat(item.revenue || 0);
-        });
+      if (r.client) {
+        clientMap[r.client] = (clientMap[r.client] || 0) + parseFloat(r.total_revenue_with_vat || r.charged_with_vat || 0);
       }
-    }
+    });
 
     // KPI cards
     const kpisEl = document.getElementById('dashboard-kpis');
