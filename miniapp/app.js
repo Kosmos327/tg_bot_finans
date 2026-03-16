@@ -109,6 +109,26 @@ async function apiFetch(path, options = {}) {
   return response.json();
 }
 
+/**
+ * Extract a human-readable error message from any error value.
+ * Handles strings, Error objects, FastAPI detail responses, and plain objects.
+ */
+function getErrorMessage(error) {
+  if (!error) return 'Unknown error';
+  if (typeof error === 'string') return error;
+  if (error.detail) {
+    if (typeof error.detail === 'string') return error.detail;
+    if (Array.isArray(error.detail))
+      return error.detail.map(e => e.msg || JSON.stringify(e)).join(', ');
+  }
+  if (error.message) return error.message;
+  if (error.response?.detail) {
+    if (typeof error.response.detail === 'string') return error.response.detail;
+    return JSON.stringify(error.response.detail);
+  }
+  return JSON.stringify(error);
+}
+
 // ==========================================
 // APP STATE
 // ==========================================
@@ -170,6 +190,35 @@ function switchTab(tabId) {
 // ==========================================
 // SETTINGS LOADER
 // ==========================================
+
+/**
+ * Normalize raw enriched-settings response into a unified {id, name} format.
+ * Handles backend field-name variants (e.g. client_name vs name).
+ */
+function normalizeSettings(data) {
+  return {
+    clients: (data.clients || []).map(c => ({
+      id: c.id,
+      name: c.name || c.client_name,
+    })),
+    managers: (data.managers || []).map(m => ({
+      id: m.id,
+      name: m.name || m.manager_name,
+    })),
+    directions: (data.business_directions || data.directions || []).map(d => ({
+      id: d.id,
+      name: d.name,
+    })),
+    warehouses: (data.warehouses || []).map(w => ({
+      id: w.id,
+      name: w.name,
+      code: w.code,
+    })),
+    expense_categories: data.expense_categories || [],
+    vat_types: data.vat_types || [],
+  };
+}
+
 async function loadSettings() {
   // Prevent duplicate requests — return cached settings if already loaded.
   if (state.settings) return state.settings;
@@ -178,7 +227,7 @@ async function loadSettings() {
   try {
     const enriched = await apiFetch('/settings/enriched');
     console.log("Loaded settings:", enriched);
-    state.enrichedSettings = enriched;
+    state.enrichedSettings = normalizeSettings(enriched);
     state.settings = enriched;
     populateSelects(enriched);
     updateSettingsStats(enriched);
@@ -199,6 +248,7 @@ async function loadSettings() {
     };
     state.settings = fallback;
     state.enrichedSettings = null;
+    console.warn("Settings not loaded, using fallback lists");
     populateSelects(fallback);
     updateSettingsStats(fallback);
     return fallback;
@@ -244,12 +294,25 @@ function populateSelects(data) {
 
   // Expense category level 1 — populate from DB categories if available
   if (data.expense_categories && data.expense_categories.length > 0) {
-    // Rebuild EXPENSE_CATS_L2 map from loaded data so L2 dropdowns stay in sync
+    // Rebuild EXPENSE_CATS_L2 map and ID lookup maps from loaded data
     const cat1Items = [];
     data.expense_categories.forEach(cat => {
       const key = cat.name.toLowerCase();
+      const catIdStr = String(cat.id);
+      // Store sub-category objects {id, name} indexed by L1 numeric ID (for ID-based lookup)
+      EXPENSE_CATS_L2_BY_ID[catIdStr] = (cat.sub_categories || []).map(sc => ({ id: sc.id, name: sc.name }));
+      // Also keep name-based fallback for static EXPENSE_CATS_L2 (used when settings fail)
       EXPENSE_CATS_L2[key] = (cat.sub_categories || []).map(sc => sc.name);
-      cat1Items.push({ id: cat.name, name: cat.name });
+      // Build name→id and id→name lookups for category submission
+      EXPENSE_CAT_L1_NAME_TO_ID[key] = cat.id;
+      EXPENSE_CAT_L1_ID_TO_NAME[catIdStr] = key;
+      (cat.sub_categories || []).forEach(sc => {
+        const scKey = sc.name.toLowerCase();
+        EXPENSE_CAT_L2_NAME_TO_ID[scKey] = sc.id;
+        EXPENSE_CAT_L2_ID_TO_NAME[String(sc.id)] = scKey;
+      });
+      // Use numeric ID as dropdown value
+      cat1Items.push({ id: cat.id, name: cat.name });
     });
     fillSelect('expense-cat1', cat1Items);
   }
@@ -478,7 +541,7 @@ async function handleFormSubmit(e) {
     state.deals = [];
 
   } catch (err) {
-    showToast(`Ошибка при сохранении: ${err.message}`, 'error');
+    showToast(`Ошибка при сохранении: ${getErrorMessage(err)}`, 'error');
   } finally {
     setSubmitting(false);
   }
@@ -675,7 +738,7 @@ async function loadDeals() {
     state.deals = deals;
     renderDeals();
   } catch (err) {
-    showToast(`Ошибка загрузки сделок: ${err.message}`, 'error');
+    showToast(`Ошибка загрузки сделок: ${getErrorMessage(err)}`, 'error');
     showDealsEmpty(true);
   } finally {
     state.isLoadingDeals = false;
@@ -688,9 +751,19 @@ function renderDeals() {
   const clientFilter = document.getElementById('filter-client')?.value || '';
   const monthFilter = document.getElementById('filter-month')?.value || '';
 
+  // Build ID→name map for client lookup (filter-client dropdown uses numeric IDs)
+  const clientMap = Object.fromEntries(
+    (state.enrichedSettings?.clients || []).map(c => [String(c.id), c.name])
+  );
+
   let filtered = state.deals.filter(deal => {
     if (statusFilter && deal.status !== statusFilter) return false;
-    if (clientFilter && deal.client !== clientFilter) return false;
+    if (clientFilter) {
+      // clientFilter is a numeric ID; deal.client is a name, deal.client_id is a numeric ID
+      const dealClientName = deal.client || clientMap[String(deal.client_id)];
+      const filterClientName = clientMap[clientFilter] || clientFilter;
+      if (dealClientName !== filterClientName) return false;
+    }
     if (monthFilter) {
       const startDate = deal.project_start_date || '';
       if (!startDate.startsWith(monthFilter)) return false;
@@ -818,7 +891,7 @@ async function loadDealsForEdit() {
       dealSelect.appendChild(opt);
     });
   } catch (err) {
-    showToast(`Ошибка загрузки сделок: ${err.message}`, 'error');
+    showToast(`Ошибка загрузки сделок: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -850,7 +923,7 @@ async function onEditDealSelected(dealId) {
     if (formBody) formBody.style.display = 'block';
     if (saveActions) saveActions.style.display = 'block';
   } catch (err) {
-    showToast(`Ошибка загрузки сделки: ${err.message}`, 'error');
+    showToast(`Ошибка загрузки сделки: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -897,7 +970,7 @@ async function saveEditedDeal() {
     });
     showToast(`Сделка ${dealId} обновлена!`, 'success');
   } catch (err) {
-    showToast(`Ошибка: ${err.message}`, 'error');
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -929,7 +1002,7 @@ async function openDealModal(dealId) {
     try {
       deal = await apiFetch(`/deals/${dealId}`);
     } catch (err) {
-      showToast(`Ошибка загрузки сделки: ${err.message}`, 'error');
+      showToast(`Ошибка загрузки сделки: ${getErrorMessage(err)}`, 'error');
       return;
     }
   }
@@ -1290,7 +1363,7 @@ async function addClient() {
     showToast('Клиент добавлен', 'success');
     await loadClientsSettings();
   } catch (err) {
-    showToast(`Ошибка: ${err.message}`, 'error');
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -1301,7 +1374,7 @@ async function deleteClient(clientId, clientName) {
     showToast('Клиент удалён', 'success');
     await loadClientsSettings();
   } catch (err) {
-    showToast(`Ошибка: ${err.message}`, 'error');
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -1335,7 +1408,7 @@ async function addManager() {
     showToast('Менеджер добавлен', 'success');
     await loadManagersSettings();
   } catch (err) {
-    showToast(`Ошибка: ${err.message}`, 'error');
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -1346,7 +1419,7 @@ async function deleteManager(managerId, managerName) {
     showToast('Менеджер удалён', 'success');
     await loadManagersSettings();
   } catch (err) {
-    showToast(`Ошибка: ${err.message}`, 'error');
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -1377,7 +1450,7 @@ async function addDirection() {
     showToast('Направление добавлено', 'success');
     await loadDirectionsSettings();
   } catch (err) {
-    showToast(`Ошибка: ${err.message}`, 'error');
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -1388,7 +1461,7 @@ async function deleteDirection(direction) {
     showToast('Направление удалено', 'success');
     await loadDirectionsSettings();
   } catch (err) {
-    showToast(`Ошибка: ${err.message}`, 'error');
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -1420,7 +1493,7 @@ async function addStatus() {
     showToast('Статус добавлен', 'success');
     await loadStatusesSettings();
   } catch (err) {
-    showToast(`Ошибка: ${err.message}`, 'error');
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -1431,7 +1504,7 @@ async function deleteStatus(status) {
     showToast('Статус удалён', 'success');
     await loadStatusesSettings();
   } catch (err) {
-    showToast(`Ошибка: ${err.message}`, 'error');
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -2011,8 +2084,8 @@ async function loadBillingEntry() {
       showToast('Новая запись — введите данные', 'default');
     }
   } catch (err) {
-    if (statusEl) { statusEl.textContent = `Ошибка: ${err.message}`; }
-    showToast(`Ошибка поиска: ${err.message}`, 'error');
+    if (statusEl) { statusEl.textContent = `Ошибка: ${getErrorMessage(err)}`; }
+    showToast(`Ошибка поиска: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -2122,7 +2195,7 @@ async function saveBilling() {
       });
       showToast('Billing сохранён!', 'success');
     } catch (err) {
-      showToast(`Ошибка: ${err.message}`, 'error');
+      showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
     }
     return;
   }
@@ -2188,7 +2261,7 @@ async function saveBilling() {
     });
     showToast('Billing сохранён!', 'success');
   } catch (err) {
-    showToast(`Ошибка: ${err.message}`, 'error');
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -2213,7 +2286,7 @@ async function markPayment() {
     if (dealIdEl) dealIdEl.value = '';
     document.getElementById('payment-amount').value = '';
   } catch (err) {
-    showToast(`Ошибка: ${err.message}`, 'error');
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -2227,22 +2300,89 @@ const EXPENSE_CATS_L2 = {
   'другое': [],
 };
 
+// Maps populated from enriched settings: L1 numeric ID → [{id, name}] sub-categories
+const EXPENSE_CATS_L2_BY_ID = {};
+// Name→ID lookup maps for payload construction
+const EXPENSE_CAT_L1_NAME_TO_ID = {};
+const EXPENSE_CAT_L2_NAME_TO_ID = {};
+// Reverse ID→name maps for O(1) name resolution (populated alongside NAME_TO_ID maps)
+const EXPENSE_CAT_L1_ID_TO_NAME = {};
+const EXPENSE_CAT_L2_ID_TO_NAME = {};
+
 const COMMENT_REQUIRED_L2 = new Set(['другое', 'упаковочный материал']);
+
+/**
+ * Resolve L1 category name from its dropdown value (may be numeric ID or name string).
+ */
+function _getCat1Name(cat1Val) {
+  if (EXPENSE_CAT_L1_ID_TO_NAME[cat1Val] !== undefined) {
+    return EXPENSE_CAT_L1_ID_TO_NAME[cat1Val];
+  }
+  return (cat1Val || '').toLowerCase();
+}
+
+/**
+ * Resolve L2 category name from its dropdown value (may be numeric ID or name string).
+ */
+function _getCat2Name(cat2Val) {
+  if (!cat2Val) return '';
+  if (EXPENSE_CAT_L2_ID_TO_NAME[cat2Val] !== undefined) {
+    return EXPENSE_CAT_L2_ID_TO_NAME[cat2Val];
+  }
+  return cat2Val.toLowerCase();
+}
+
+/**
+ * Resolve category level IDs for expense payload.
+ * Returns {cat1Id, cat2Id} where values may be undefined if no ID is available.
+ */
+function _resolveCatIds(cat1Val, cat2Val) {
+  // If enriched settings are loaded, cat values are numeric IDs
+  const hasEnrichedCats = Object.keys(EXPENSE_CATS_L2_BY_ID).length > 0;
+  let cat1Id, cat2Id;
+  if (hasEnrichedCats) {
+    cat1Id = Number(cat1Val) || undefined;
+    cat2Id = cat2Val ? (Number(cat2Val) || undefined) : undefined;
+  } else {
+    // Fallback: look up IDs from names
+    const cat1Name = _getCat1Name(cat1Val);
+    const cat2Name = _getCat2Name(cat2Val);
+    cat1Id = EXPENSE_CAT_L1_NAME_TO_ID[cat1Name] || undefined;
+    cat2Id = cat2Val ? (EXPENSE_CAT_L2_NAME_TO_ID[cat2Name] || undefined) : undefined;
+  }
+  return { cat1Id, cat2Id };
+}
 
 function updateExpenseCat2(cat1Val, cat2SelectId, cat2FieldId) {
   const cat2Select = document.getElementById(cat2SelectId);
   const cat2Field = document.getElementById(cat2FieldId);
   if (!cat2Select || !cat2Field) return;
 
-  const options = EXPENSE_CATS_L2[cat1Val] || [];
-  cat2Select.innerHTML = '<option value="">Выберите...</option>';
-  options.forEach(opt => {
-    const o = document.createElement('option');
-    o.value = opt.toLowerCase();
-    o.textContent = opt;
-    cat2Select.appendChild(o);
-  });
-  cat2Field.style.display = (options.length > 0) ? 'block' : 'none';
+  // Prefer ID-keyed lookup (from enriched settings); fall back to name-based static map
+  const subCats = EXPENSE_CATS_L2_BY_ID[cat1Val];
+  if (subCats !== undefined) {
+    // enriched path: sub-categories are {id, name} objects
+    cat2Select.innerHTML = '<option value="">Выберите...</option>';
+    subCats.forEach(sc => {
+      const o = document.createElement('option');
+      o.value = String(sc.id);
+      o.textContent = sc.name;
+      cat2Select.appendChild(o);
+    });
+    cat2Field.style.display = (subCats.length > 0) ? 'block' : 'none';
+  } else {
+    // fallback path: use name-based static EXPENSE_CATS_L2
+    const cat1Name = _getCat1Name(cat1Val);
+    const options = EXPENSE_CATS_L2[cat1Name] || [];
+    cat2Select.innerHTML = '<option value="">Выберите...</option>';
+    options.forEach(opt => {
+      const o = document.createElement('option');
+      o.value = opt.toLowerCase();
+      o.textContent = opt;
+      cat2Select.appendChild(o);
+    });
+    cat2Field.style.display = (options.length > 0) ? 'block' : 'none';
+  }
 }
 
 function updateExpenseCommentVisibility(cat1Val, cat2Val, commentFieldId, requiredMarkId) {
@@ -2250,11 +2390,13 @@ function updateExpenseCommentVisibility(cat1Val, cat2Val, commentFieldId, requir
   const requiredMark = document.getElementById(requiredMarkId);
   if (!commentField) return;
 
-  const cat1Required = (cat1Val === 'другое');
-  const cat2Required = cat2Val && COMMENT_REQUIRED_L2.has(cat2Val.toLowerCase());
+  const cat1Name = _getCat1Name(cat1Val);
+  const cat2Name = _getCat2Name(cat2Val);
+  const cat1Required = (cat1Name === 'другое');
+  const cat2Required = cat2Val && COMMENT_REQUIRED_L2.has(cat2Name);
   const needsComment = cat1Required || cat2Required;
 
-  commentField.style.display = (needsComment || cat1Val === 'другое') ? 'block' : 'none';
+  commentField.style.display = (needsComment || cat1Name === 'другое') ? 'block' : 'none';
   if (requiredMark) requiredMark.style.display = needsComment ? 'inline' : 'none';
 }
 
@@ -2378,7 +2520,8 @@ function addBulkRow() {
     bulkCat1El.innerHTML = '<option value="">Выбрать...</option>';
     loadedCats.forEach(cat => {
       const o = document.createElement('option');
-      o.value = cat.name;
+      // Use numeric ID as value when available (matches enriched settings); fall back to name
+      o.value = (cat.id != null) ? String(cat.id) : cat.name;
       o.textContent = cat.name;
       bulkCat1El.appendChild(o);
     });
@@ -2437,9 +2580,12 @@ async function saveBulkExpenses() {
     if (!cat1) { showToast(`Строка ${parseInt(idx)+1}: выберите категорию 1`, 'error'); return; }
     if (!amount) { showToast(`Строка ${parseInt(idx)+1}: укажите сумму`, 'error'); return; }
 
+    const { cat1Id, cat2Id } = _resolveCatIds(cat1, cat2);
     rows.push({
-      category_level_1: cat1,
-      category_level_2: cat2 || undefined,
+      category_level_1_id: cat1Id || undefined,
+      category_level_2_id: cat2Id || undefined,
+      category_level_1: _getCat1Name(cat1) || undefined,
+      category_level_2: cat2 ? (_getCat2Name(cat2) || undefined) : undefined,
       comment: comment || undefined,
       amount_without_vat: vatRate ? amount / (1 + vatRate) : amount,
       vat_rate: vatRate || undefined,
@@ -2465,7 +2611,7 @@ async function saveBulkExpenses() {
     if (saveActionsEl) saveActionsEl.style.display = 'none';
     _bulkRowIndex = 0;
   } catch (err) {
-    showToast(`Ошибка: ${err.message}`, 'error');
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -2478,9 +2624,11 @@ async function saveExpense() {
   if (!cat1) { showToast('Выберите категорию', 'error'); return; }
   if (!amount || amount <= 0) { showToast('Укажите сумму расхода', 'error'); return; }
 
-  // Validate comment requirement
-  const cat1Required = (cat1 === 'другое');
-  const cat2Required = cat2 && COMMENT_REQUIRED_L2.has(cat2.toLowerCase());
+  // Validate comment requirement (resolve names for ID-based values)
+  const cat1Name = _getCat1Name(cat1);
+  const cat2Name = _getCat2Name(cat2);
+  const cat1Required = (cat1Name === 'другое');
+  const cat2Required = cat2 && COMMENT_REQUIRED_L2.has(cat2Name);
   if ((cat1Required || cat2Required) && !comment) {
     showToast('Комментарий обязателен для выбранной категории', 'error');
     return;
@@ -2493,9 +2641,14 @@ async function saveExpense() {
   const vatRate = parseFloat(document.getElementById('expense-vat-rate')?.value || 0) || 0;
   const vat = parseFloat(document.getElementById('expense-vat')?.value || 0) || 0;
 
+  // Resolve category IDs: prefer numeric ID from enriched settings lookup
+  const { cat1Id, cat2Id } = _resolveCatIds(cat1, cat2);
+
   const payload = {
-    category_level_1: cat1,
-    category_level_2: cat2 || undefined,
+    category_level_1_id: cat1Id || undefined,
+    category_level_2_id: cat2Id || undefined,
+    category_level_1: cat1Name || undefined,
+    category_level_2: cat2Name || undefined,
     comment: comment || undefined,
     deal_id: dealId ? (Number.isFinite(parseInt(dealId, 10)) ? parseInt(dealId, 10) : undefined) : undefined,
     amount_without_vat: vatRate ? amount / (1 + vatRate) : amount - vat,
@@ -2524,7 +2677,7 @@ async function saveExpense() {
     if (calcNoVatEl) calcNoVatEl.textContent = '0.00 ₽';
     if (calcVatAmountEl) calcVatAmountEl.textContent = '0.00 ₽';
   } catch (err) {
-    showToast(`Ошибка: ${err.message}`, 'error');
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -2574,7 +2727,7 @@ async function loadExpenses() {
     }
   } catch (err) {
     if (loadingEl) loadingEl.style.display = 'none';
-    showToast(`Ошибка загрузки расходов: ${err.message}`, 'error');
+    showToast(`Ошибка загрузки расходов: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -2633,7 +2786,7 @@ async function downloadReport(reportType, fmt) {
     URL.revokeObjectURL(objectUrl);
     showToast(`Отчёт скачан (${fmt.toUpperCase()})`, 'success');
   } catch (err) {
-    showToast(`Ошибка скачивания: ${err.message}`, 'error');
+    showToast(`Ошибка скачивания: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -2686,7 +2839,7 @@ async function loadJournal() {
     }
   } catch (err) {
     if (loadingEl) loadingEl.style.display = 'none';
-    showToast(`Ошибка загрузки журнала: ${err.message}`, 'error');
+    showToast(`Ошибка загрузки журнала: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -2797,7 +2950,7 @@ async function loadOwnerDashboard() {
   } catch (err) {
     if (loadingEl) loadingEl.style.display = 'none';
     if (emptyEl)   emptyEl.style.display   = 'flex';
-    showToast(`Ошибка загрузки дашборда: ${err.message}`, 'error');
+    showToast(`Ошибка загрузки дашборда: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -2905,7 +3058,7 @@ async function loadReceivables() {
   } catch (err) {
     if (loadingEl) loadingEl.style.display = 'none';
     if (emptyEl)   emptyEl.style.display   = 'flex';
-    showToast(`Ошибка загрузки задолженности: ${err.message}`, 'error');
+    showToast(`Ошибка загрузки задолженности: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -3009,8 +3162,8 @@ async function runMonthArchive(dryRun) {
       setTimeout(loadArchiveBatches, 500);
     }
   } catch (err) {
-    _showMonthCloseResult(resultEl, null, err.message);
-    showToast(`Ошибка: ${err.message}`, 'error');
+    _showMonthCloseResult(resultEl, null, getErrorMessage(err));
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -3034,8 +3187,8 @@ async function runMonthCleanup() {
     // Refresh archive batches after cleanup
     setTimeout(loadArchiveBatches, 500);
   } catch (err) {
-    _showMonthCloseResult(resultEl, null, err.message);
-    showToast(`Ошибка: ${err.message}`, 'error');
+    _showMonthCloseResult(resultEl, null, getErrorMessage(err));
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -3060,8 +3213,8 @@ async function runMonthClose() {
     // Refresh archive batches after closing the month
     setTimeout(loadArchiveBatches, 500);
   } catch (err) {
-    _showMonthCloseResult(resultEl, null, err.message);
-    showToast(`Ошибка: ${err.message}`, 'error');
+    _showMonthCloseResult(resultEl, null, getErrorMessage(err));
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -3086,7 +3239,7 @@ async function loadArchiveBatches() {
       </div>
     `).join('');
   } catch (err) {
-    if (listEl) listEl.innerHTML = `<div class="month-close-error">❌ ${escHtml(err.message)}</div>`;
-    showToast(`Ошибка: ${err.message}`, 'error');
+    if (listEl) listEl.innerHTML = `<div class="month-close-error">❌ ${escHtml(getErrorMessage(err))}</div>`;
+    showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
   }
 }
