@@ -25,12 +25,17 @@ const BILLING_INPUT_MODE_OLD         = 'Старый (p1/p2)';
 // ==========================================
 // TELEGRAM WEB APP INIT
 // ==========================================
-const tg = window.Telegram?.WebApp;
+// tg is intentionally null at module level and assigned inside initTelegram()
+// (called on DOMContentLoaded) to avoid capturing the SDK reference before the
+// Telegram client has fully injected initData/initDataUnsafe into the webview.
+let tg = null;
 let telegramUser = null;
 
 function initTelegram() {
+  tg = window.Telegram?.WebApp;
+
   console.log('[tg-init] window.Telegram exists:', !!window.Telegram);
-  console.log('[tg-init] Telegram.WebApp exists:', !!window.Telegram?.WebApp);
+  console.log('[tg-init] Telegram.WebApp exists:', !!tg);
 
   if (!tg) {
     console.warn('[tg-init] Telegram WebApp SDK not available – running outside Telegram');
