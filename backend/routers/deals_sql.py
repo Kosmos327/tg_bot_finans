@@ -3,9 +3,11 @@ deals_sql.py – Deal endpoints using PostgreSQL SQL functions and views.
 
 Routes
 ------
-GET  /deals               – read from public.v_api_deals
-POST /deals/create        – call public.api_create_deal(...)
-POST /deals/pay           – call public.api_pay_deal(...)
+GET   /deals                  – read from public.v_api_deals
+GET   /deals/{deal_id}        – single deal from public.v_api_deals
+POST  /deals/create           – call public.api_create_deal(...)
+POST  /deals/pay              – call public.api_pay_deal(...)
+PATCH /deals/update/{deal_id} – update deal fields (PG ORM; no SQL function yet)
 """
 
 import logging
@@ -15,6 +17,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.database import get_db
+from backend.models.deal import DealUpdate
 from backend.schemas.deals import DealCreateRequest, DealPayRequest
 from backend.services.db_exec import call_sql_function, call_sql_function_one, read_sql_view
 from backend.services.miniapp_auth_service import get_user_by_telegram_id, get_role_code
@@ -192,3 +195,130 @@ async def pay_deal(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/{deal_id}", response_model=Dict[str, Any])
+async def get_deal(
+    deal_id: str,
+    db: AsyncSession = Depends(get_db),
+    x_telegram_id: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """
+    Return a single deal from public.v_api_deals.
+
+    Looks up by integer primary key (id) when deal_id is numeric, or falls
+    back to matching the deal_id text column for string codes.
+
+    Replaces the legacy GET /deal/{id} endpoint.
+    """
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id)
+
+    if role == NO_ACCESS_ROLE:
+        raise HTTPException(status_code=403, detail="Access denied: please login first")
+
+    # Try integer lookup first (common case: deal.id stored as str in UI state)
+    try:
+        int_id = int(deal_id)
+        where = "id = :deal_id"
+        params: dict = {"deal_id": int_id}
+    except (ValueError, TypeError):
+        where = "deal_id = :deal_id"
+        params = {"deal_id": deal_id}
+
+    try:
+        rows = await read_sql_view(
+            db,
+            "public.v_api_deals",
+            where_clause=where,
+            params=params,
+            limit=1,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="Deal not found")
+
+    deal = rows[0]
+
+    # Managers can only view their own deals
+    if role == "manager" and x_telegram_id:
+        try:
+            tid = int(x_telegram_id.strip())
+        except (ValueError, TypeError):
+            tid = None
+        if tid and deal.get("manager_telegram_id") != tid:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    return deal
+
+
+@router.patch("/update/{deal_id}", response_model=Dict[str, Any])
+async def update_deal(
+    deal_id: str,
+    update: DealUpdate,
+    db: AsyncSession = Depends(get_db),
+    x_telegram_id: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """
+    Update deal fields via PostgreSQL.
+
+    Uses the existing PG-based update service (no api_update_deal() SQL
+    function exists yet).  Role-based field filtering is applied server-side.
+
+    Replaces the legacy PATCH /deal/update/{id} endpoint.
+    """
+    from backend.services import deals_service
+
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id)
+
+    if role == NO_ACCESS_ROLE:
+        raise HTTPException(status_code=403, detail="Access denied: please login first")
+
+    update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+
+    if not update_data:
+        raise HTTPException(status_code=422, detail="No fields to update")
+
+    # Managers can only edit their own deals
+    if role == "manager":
+        try:
+            int_id = int(deal_id)
+            rows = await read_sql_view(
+                db, "public.v_api_deals", where_clause="id = :id", params={"id": int_id}, limit=1
+            )
+        except (ValueError, TypeError):
+            rows = []
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        if not rows:
+            raise HTTPException(status_code=404, detail="Deal not found")
+
+        manager_tid = rows[0].get("manager_telegram_id")
+        try:
+            tid = int(x_telegram_id.strip()) if x_telegram_id else None
+        except (ValueError, TypeError):
+            tid = None
+        if tid and manager_tid != tid:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        success = await deals_service.update_deal_pg(
+            db=db,
+            deal_id=deal_id,
+            update_data=update_data,
+            telegram_user_id=str(user_id) if user_id else "",
+            user_role=role,
+            full_name=full_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Unexpected error updating deal %s: %s", deal_id, exc)
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Deal not found")
+
+    return {"success": True, "deal_id": deal_id}
