@@ -98,7 +98,10 @@ async function apiFetch(path, options = {}) {
     let errorDetail = `HTTP ${response.status}`;
     try {
       const err = await response.json();
-      errorDetail = err.detail || err.error || errorDetail;
+      const rawDetail = err.detail || err.error;
+      if (rawDetail !== undefined && rawDetail !== null) {
+        errorDetail = typeof rawDetail === 'string' ? rawDetail : JSON.stringify(rawDetail);
+      }
     } catch (_) {}
     throw new Error(errorDetail);
   }
@@ -168,10 +171,13 @@ function switchTab(tabId) {
 // SETTINGS LOADER
 // ==========================================
 async function loadSettings() {
+  // Prevent duplicate requests — return cached settings if already loaded.
+  if (state.settings) return state.settings;
   // /settings/enriched is the single source of truth for all reference data.
   // It returns {id, name} objects used by SQL-function endpoints.
   try {
     const enriched = await apiFetch('/settings/enriched');
+    console.log("Loaded settings:", enriched);
     state.enrichedSettings = enriched;
     state.settings = enriched;
     populateSelects(enriched);
@@ -189,6 +195,7 @@ async function loadSettings() {
       vat_types: ['С НДС', 'Без НДС'],
       sources: ['Рекомендация', 'Сайт', 'Реклама', 'Холодный звонок', 'Другое'],
       warehouses: [],
+      expense_categories: [],
     };
     state.settings = fallback;
     state.enrichedSettings = null;
@@ -234,6 +241,18 @@ function populateSelects(data) {
   fillSelect('expense-client-select', data.clients || []);
   // Reports: billing-by-client
   fillSelect('report-client-select', data.clients || []);
+
+  // Expense category level 1 — populate from DB categories if available
+  if (data.expense_categories && data.expense_categories.length > 0) {
+    // Rebuild EXPENSE_CATS_L2 map from loaded data so L2 dropdowns stay in sync
+    const cat1Items = [];
+    data.expense_categories.forEach(cat => {
+      const key = cat.name.toLowerCase();
+      EXPENSE_CATS_L2[key] = (cat.sub_categories || []).map(sc => sc.name);
+      cat1Items.push({ id: cat.name, name: cat.name });
+    });
+    fillSelect('expense-cat1', cat1Items);
+  }
 }
 
 /**
@@ -2351,6 +2370,19 @@ function addBulkRow() {
     </div>
   `;
   container.appendChild(row);
+
+  // Populate bulk-cat1 from loaded settings categories if available
+  const bulkCat1El = document.getElementById(`bulk-cat1-${idx}`);
+  const loadedCats = state.settings && state.settings.expense_categories;
+  if (bulkCat1El && loadedCats && loadedCats.length > 0) {
+    bulkCat1El.innerHTML = '<option value="">Выбрать...</option>';
+    loadedCats.forEach(cat => {
+      const o = document.createElement('option');
+      o.value = cat.name;
+      o.textContent = cat.name;
+      bulkCat1El.appendChild(o);
+    });
+  }
 
   // Hook category change
   const cat1El = document.getElementById(`bulk-cat1-${idx}`);
