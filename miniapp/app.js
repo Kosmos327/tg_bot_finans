@@ -80,6 +80,21 @@ function getTelegramInitData() {
   return tg?.initData || '';
 }
 
+/**
+ * Returns true when a Telegram auth context is available — i.e. the SDK is
+ * present AND either initData is non-empty or a user object can be resolved.
+ * Use this instead of a bare `telegramUser` check so that launches where
+ * initDataUnsafe.user is temporarily null but initData still exists are handled
+ * correctly (we still call /auth/miniapp-login in that case).
+ */
+function hasTelegramAuthContext() {
+  const tgSdkAvailable = !!tg;
+  const hasInitData = !!(tg?.initData);
+  const hasUser = !!(telegramUser || tg?.initDataUnsafe?.user);
+  console.log('[tg-context] SDK:', tgSdkAvailable, '| initData:', hasInitData, '| user:', hasUser);
+  return tgSdkAvailable && (hasInitData || hasUser);
+}
+
 // ==========================================
 // API HELPERS
 // ==========================================
@@ -1189,24 +1204,15 @@ function initModal() {
 // SETTINGS TAB
 // ==========================================
 async function checkConnections() {
-  // Telegram: consider WebApp present AND (initData non-empty OR user object available).
-  // initData can be an empty string in certain Telegram contexts even when opened from
-  // within Telegram, so we also check initDataUnsafe.user / telegramUser as fallback.
-  const tgSdkAvailable = !!tg;
-  const hasInitData = !!(tg?.initData);
-  const hasUser = !!(telegramUser || tg?.initDataUnsafe?.user);
-  const isInTelegram    = tgSdkAvailable && (hasInitData || hasUser);
+  // Use the shared helper so UI logic matches real auth logic.
+  const isInTelegram = hasTelegramAuthContext();
 
-  console.log('[tg-check] SDK available:', tgSdkAvailable, '| initData present:', hasInitData,
-              '| user present:', hasUser, '| isInTelegram:', isInTelegram);
+  console.log('[tg-check] isInTelegram:', isInTelegram);
 
   let tgStatus, tgOk;
   if (isInTelegram) {
     tgOk = true;
     tgStatus = 'Подключено';
-  } else if (tgSdkAvailable) {
-    tgOk = false;
-    tgStatus = 'Открыто вне Telegram';
   } else {
     tgOk = false;
     tgStatus = 'Открыто вне Telegram';
@@ -1651,7 +1657,7 @@ async function init() {
   // If running inside Telegram and user has a saved role but no telegram_id stored,
   // the app_users record may not exist yet (old login flow). Force re-authentication
   // so that /auth/miniapp-login is called and the record is created.
-  if (savedRole && telegramUser && !localStorage.getItem('telegram_id')) {
+  if (savedRole && hasTelegramAuthContext() && !localStorage.getItem('telegram_id')) {
     localStorage.removeItem('user_role');
     localStorage.removeItem('user_role_label');
     showAuthScreen();
@@ -1791,25 +1797,35 @@ function initAuthHandlers() {
     try {
       let role, roleLabel;
 
-      console.log('[auth] doLogin – selectedRole:', selectedRole, '| authMode:', telegramUser ? 'telegram' : 'role-login');
+      const useTelegramAuth = hasTelegramAuthContext();
+      console.log('[auth] doLogin – selectedRole:', selectedRole, '| authMode:', useTelegramAuth ? 'telegram' : 'role-login',
+                  '| initData:', !!(tg?.initData), '| telegramUser:', !!telegramUser);
 
-      if (telegramUser) {
-        // Primary path: call /auth/miniapp-login to create/update app_users record
-        const fullName = [telegramUser.first_name, telegramUser.last_name]
-          .filter(Boolean).join(' ');
+      if (useTelegramAuth) {
+        // Primary path: call /auth/miniapp-login to create/update app_users record.
+        // Use telegramUser fields when available; fall back to tg.initDataUnsafe.user
+        // when telegramUser is null but initData still signals a Telegram context.
+        const userSource = telegramUser || tg?.initDataUnsafe?.user || null;
+        const fullName = userSource
+          ? [userSource.first_name, userSource.last_name].filter(Boolean).join(' ')
+          : null;
+        const telegramId = userSource?.id ?? null;
         const result = await apiFetch('/auth/miniapp-login', {
           method: 'POST',
           body: JSON.stringify({
-            telegram_id: telegramUser.id,
+            telegram_id: telegramId,
             full_name: fullName,
-            username: telegramUser.username || null,
+            username: userSource?.username || null,
             selected_role: selectedRole,
             password,
           }),
         });
         role = result.role;
         roleLabel = ROLE_LABELS[role] || role;
-        localStorage.setItem('telegram_id', String(telegramUser.id));
+        if (telegramId) {
+          localStorage.setItem('telegram_id', String(telegramId));
+          console.log('[auth] telegram_id saved to localStorage:', telegramId);
+        }
       } else {
         // Fallback path: no Telegram context (e.g. dev/testing environment)
         const result = await apiFetch('/auth/role-login', {
