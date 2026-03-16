@@ -69,25 +69,29 @@ function getTelegramInitData() {
 // ==========================================
 // API HELPERS
 // ==========================================
+
+/**
+ * Build auth headers shared by apiFetch and downloadReport.
+ * Attaches X-Telegram-Init-Data, X-Telegram-Id, and X-User-Role when available.
+ */
+function getAuthHeaders() {
+  const h = {};
+  const initData = getTelegramInitData();
+  if (initData) h['X-Telegram-Init-Data'] = initData;
+  const telegramId = telegramUser?.id || localStorage.getItem('telegram_id');
+  if (telegramId) h['X-Telegram-Id'] = String(telegramId);
+  const savedRole = localStorage.getItem('user_role');
+  if (savedRole) h['X-User-Role'] = savedRole;
+  return h;
+}
+
 async function apiFetch(path, options = {}) {
+  const authHeaders = getAuthHeaders();
   const headers = {
     'Content-Type': 'application/json',
-    ...options.headers,
+    ...authHeaders,
+    ...options.headers,  // allow callers to override specific headers
   };
-  const initData = getTelegramInitData();
-  if (initData) {
-    headers['X-Telegram-Init-Data'] = initData;
-  }
-  // Attach telegram_id for app_users-based auth (primary resolution path)
-  if (!headers['X-Telegram-Id']) {
-    const telegramId = telegramUser?.id || localStorage.getItem('telegram_id');
-    if (telegramId) headers['X-Telegram-Id'] = String(telegramId);
-  }
-  // Attach stored role for password-auth users
-  if (!headers['X-User-Role']) {
-    const savedRole = localStorage.getItem('user_role');
-    if (savedRole) headers['X-User-Role'] = savedRole;
-  }
 
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -103,6 +107,21 @@ async function apiFetch(path, options = {}) {
         errorDetail = typeof rawDetail === 'string' ? rawDetail : JSON.stringify(rawDetail);
       }
     } catch (_) {}
+
+    // Global 403 "please login first" handler: if we are inside Telegram and have a
+    // stored telegram_id, the app_users record may be missing/stale.
+    // Force re-authentication so that /auth/miniapp-login recreates the record.
+    if (response.status === 403
+        && telegramUser
+        && localStorage.getItem('telegram_id')
+        && errorDetail.includes('please login first')) {
+      console.warn('[apiFetch] 403 please-login-first detected – clearing credentials and forcing re-auth');
+      localStorage.removeItem('user_role');
+      localStorage.removeItem('user_role_label');
+      localStorage.removeItem('telegram_id');
+      setTimeout(() => showAuthScreen(), 0);
+    }
+
     throw new Error(errorDetail);
   }
 
@@ -197,6 +216,11 @@ function switchTab(tabId) {
  */
 function normalizeSettings(data) {
   return {
+    statuses: (data.statuses || []).map(s =>
+      (s && typeof s === 'object' && 'id' in s)
+        ? { id: s.id, name: s.name }
+        : { id: s, name: s }
+    ),
     clients: (data.clients || []).map(c => ({
       id: c.id,
       name: c.name || c.client_name,
@@ -1793,6 +1817,7 @@ function initAuthHandlers() {
 }
 
 async function enterApp(role) {
+  console.log('[auth] enterApp – role:', role, '| telegram_id:', localStorage.getItem('telegram_id'), '| hasTelegramUser:', !!telegramUser);
   const authScreen = document.getElementById('auth-screen');
   const appMain = document.getElementById('app-main');
   if (authScreen) authScreen.style.display = 'none';
@@ -2203,8 +2228,13 @@ async function saveBilling() {
 
   const month = document.getElementById('billing-month')?.value || null;
   const half = document.getElementById('billing-half')?.value || null;
-  // Send month and period as separate fields (new sheet structure).
-  // The combined "YYYY-MM-p1" period value is no longer used.
+
+  if (!month) {
+    showToast('Укажите месяц', 'error');
+    return;
+  }
+  // Send month and period as separate fields.
+  // month is validated non-empty above; period (half) is optional.
 
   const pVal = (id) => {
     const v = document.getElementById(id)?.value;
@@ -2221,7 +2251,7 @@ async function saveBilling() {
     const body = {
       client_id: clientId,
       warehouse_id: warehouseId,
-      month: month || undefined,
+      month,
       period: half || undefined,
       shipments_with_vat:           pVal('bv2-shipments-with-vat'),
       units_count:                  pVal('bv2-units') != null ? (parseInt(pVal('bv2-units')) || null) : null,
@@ -2233,6 +2263,7 @@ async function saveBilling() {
       penalties:                    pVal('bv2-penalties'),
     };
     Object.keys(body).forEach(k => body[k] == null && delete body[k]);
+    console.log('[billing] v2/upsert payload:', JSON.stringify(body));
     try {
       await apiFetch('/billing/v2/upsert', {
         method: 'POST',
@@ -2701,6 +2732,7 @@ async function saveExpense() {
   };
 
   try {
+    console.log('[expenses] saving single expense to /expenses/v2/create');
     await apiFetch('/expenses/v2/create', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -2736,6 +2768,7 @@ async function loadExpenses() {
   if (emptyEl) emptyEl.style.display = 'none';
 
   try {
+    console.log('[expenses] loading /expenses/v2');
     const data = await apiFetch('/expenses/v2');
 
     if (loadingEl) loadingEl.style.display = 'none';
@@ -2790,7 +2823,6 @@ function initReportsHandlers() {
 }
 
 async function downloadReport(reportType, fmt) {
-  const role = localStorage.getItem('user_role') || '';
   let url;
 
   if (reportType === 'warehouse') {
@@ -2815,7 +2847,7 @@ async function downloadReport(reportType, fmt) {
   }
 
   try {
-    const headers = { 'X-User-Role': role };
+    const headers = getAuthHeaders();
     const response = await fetch(`${API_BASE}${url}`, { headers });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -2844,6 +2876,10 @@ function initJournalHandlers() {
 }
 
 async function loadJournal() {
+  // Guard against concurrent calls (e.g. double-click or duplicate listeners)
+  if (state._loadingJournal) return;
+  state._loadingJournal = true;
+
   const loadingEl = document.getElementById('journal-loading');
   const listEl = document.getElementById('journal-list');
   const emptyEl = document.getElementById('journal-empty');
@@ -2853,15 +2889,14 @@ async function loadJournal() {
   if (emptyEl) emptyEl.style.display = 'none';
 
   try {
-    const role = localStorage.getItem('user_role') || '';
-    const data = await apiFetch('/journal?limit=50', {
-      headers: { 'X-User-Role': role },
-    });
+    console.log('[journal] loading /journal?limit=50');
+    const data = await apiFetch('/journal?limit=50');
 
     if (loadingEl) loadingEl.style.display = 'none';
 
     if (!data || data.length === 0) {
       if (emptyEl) emptyEl.style.display = 'flex';
+      state._loadingJournal = false;
       return;
     }
 
@@ -2885,6 +2920,8 @@ async function loadJournal() {
   } catch (err) {
     if (loadingEl) loadingEl.style.display = 'none';
     showToast(`Ошибка загрузки журнала: ${getErrorMessage(err)}`, 'error');
+  } finally {
+    state._loadingJournal = false;
   }
 }
 
@@ -2917,39 +2954,75 @@ async function loadOwnerDashboard() {
   try {
     const month = document.getElementById('dashboard-month-filter')?.value || '';
     const qs = month ? `?month=${encodeURIComponent(month)}` : '';
-    console.log('[dashboard] loading summary', qs || '(no filter)');
-    const rows = await apiFetch(`/dashboard/summary${qs}`);
 
-    if (loadingEl) loadingEl.style.display = 'none';
-    if (!rows || rows.length === 0) { if (emptyEl) emptyEl.style.display = 'flex'; return; }
+    // /dashboard/summary uses app_users DB auth (X-Telegram-Id required).
+    // /dashboard/owner uses legacy init-data/role auth (works for role-login users).
+    const hasTelegramId = !!(telegramUser?.id || localStorage.getItem('telegram_id'));
 
-    // Aggregate summary rows into KPI totals
     let totalRevWithVat = 0, totalRevNoVat = 0, totalExpenses = 0, totalGross = 0, totalDebt = 0;
     let paidBilling = 0, unpaidBilling = 0;
     const whMap = {};
     const clientMap = {};
 
-    rows.forEach(r => {
-      totalRevWithVat  += parseFloat(r.total_revenue_with_vat  || r.charged_with_vat  || 0);
-      totalRevNoVat    += parseFloat(r.total_revenue_without_vat || r.amount_without_vat || 0);
-      totalExpenses    += parseFloat(r.total_expenses   || 0);
-      totalGross       += parseFloat(r.gross_profit     || 0);
-      totalDebt        += parseFloat(r.total_debt       || r.debt || 0);
-      paidBilling      += parseInt(r.paid_billing_count  || 0, 10);
-      unpaidBilling    += parseInt(r.unpaid_billing_count || 0, 10);
+    if (hasTelegramId) {
+      console.log('[dashboard] /dashboard/summary (X-Telegram-Id)', qs || '(no filter)');
+      const rows = await apiFetch(`/dashboard/summary${qs}`);
 
-      if (r.warehouse || r.warehouse_code) {
-        const wh = r.warehouse || r.warehouse_code;
-        if (!whMap[wh]) whMap[wh] = { total_with_vat: 0, paid_count: 0, unpaid_count: 0 };
-        whMap[wh].total_with_vat += parseFloat(r.billing_total_with_vat || r.total_with_vat || 0);
-        whMap[wh].paid_count     += parseInt(r.paid_count  || 0, 10);
-        whMap[wh].unpaid_count   += parseInt(r.unpaid_count || 0, 10);
+      if (loadingEl) loadingEl.style.display = 'none';
+      if (!rows || rows.length === 0) { if (emptyEl) emptyEl.style.display = 'flex'; return; }
+
+      rows.forEach(r => {
+        totalRevWithVat  += parseFloat(r.total_revenue_with_vat  || r.charged_with_vat  || 0);
+        totalRevNoVat    += parseFloat(r.total_revenue_without_vat || r.amount_without_vat || 0);
+        totalExpenses    += parseFloat(r.total_expenses   || 0);
+        totalGross       += parseFloat(r.gross_profit     || 0);
+        totalDebt        += parseFloat(r.total_debt       || r.debt || 0);
+        paidBilling      += parseInt(r.paid_billing_count  || 0, 10);
+        unpaidBilling    += parseInt(r.unpaid_billing_count || 0, 10);
+
+        if (r.warehouse || r.warehouse_code) {
+          const wh = r.warehouse || r.warehouse_code;
+          if (!whMap[wh]) whMap[wh] = { total_with_vat: 0, paid_count: 0, unpaid_count: 0 };
+          whMap[wh].total_with_vat += parseFloat(r.billing_total_with_vat || r.total_with_vat || 0);
+          whMap[wh].paid_count     += parseInt(r.paid_count  || 0, 10);
+          whMap[wh].unpaid_count   += parseInt(r.unpaid_count || 0, 10);
+        }
+
+        if (r.client) {
+          clientMap[r.client] = (clientMap[r.client] || 0) + parseFloat(r.total_revenue_with_vat || r.charged_with_vat || 0);
+        }
+      });
+    } else {
+      console.log('[dashboard] /dashboard/owner (role-login fallback)', qs || '(no filter)');
+      const d = await apiFetch(`/dashboard/owner${qs}`);
+
+      if (loadingEl) loadingEl.style.display = 'none';
+      if (!d || Object.keys(d).length === 0) { if (emptyEl) emptyEl.style.display = 'flex'; return; }
+
+      totalRevWithVat = parseFloat(d.total_revenue_with_vat  || 0);
+      totalRevNoVat   = parseFloat(d.total_revenue_without_vat || 0);
+      totalExpenses   = parseFloat(d.total_expenses   || 0);
+      totalGross      = parseFloat(d.gross_profit     || 0);
+      totalDebt       = parseFloat(d.total_debt       || 0);
+      paidBilling     = parseInt(d.paid_billing_count  || 0, 10);
+      unpaidBilling   = parseInt(d.unpaid_billing_count || 0, 10);
+
+      if (d.warehouse_breakdown) {
+        Object.entries(d.warehouse_breakdown).forEach(([wh, info]) => {
+          whMap[wh] = {
+            total_with_vat: parseFloat(info.total_with_vat || 0),
+            paid_count:  parseInt(info.paid_count  || 0, 10),
+            unpaid_count: parseInt(info.unpaid_count || 0, 10),
+          };
+        });
       }
 
-      if (r.client) {
-        clientMap[r.client] = (clientMap[r.client] || 0) + parseFloat(r.total_revenue_with_vat || r.charged_with_vat || 0);
+      if (d.top_clients) {
+        d.top_clients.forEach(item => {
+          if (item.client) clientMap[item.client] = parseFloat(item.revenue || 0);
+        });
       }
-    });
+    }
 
     // KPI cards
     const kpisEl = document.getElementById('dashboard-kpis');
@@ -3200,6 +3273,7 @@ async function runMonthArchive(dryRun) {
     return;
   }
 
+  console.log(`[month-close] runMonthArchive dryRun=${dryRun}`, { year, month });
   const resultEl = document.getElementById('month-close-result');
   if (resultEl) resultEl.innerHTML = '<div class="loading-spinner"></div>';
   try {
@@ -3227,6 +3301,7 @@ async function runMonthCleanup() {
     return;
   }
 
+  console.log('[month-close] runMonthCleanup', { year, month });
   const resultEl = document.getElementById('month-close-result');
   if (resultEl) resultEl.innerHTML = '<div class="loading-spinner"></div>';
   try {
@@ -3252,6 +3327,7 @@ async function runMonthClose() {
     return;
   }
 
+  console.log('[month-close] runMonthClose', { year, month });
   const comment = document.getElementById('month-close-comment')?.value?.trim() || null;
   const resultEl = document.getElementById('month-close-result');
   if (resultEl) resultEl.innerHTML = '<div class="loading-spinner"></div>';
