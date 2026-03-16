@@ -214,8 +214,19 @@ function populateSelects(data) {
   fillSelect('vat_type', data.vat_types || []);
   fillSelect('source', data.sources || []);
 
-  // Billing client dropdown (uses IDs from enriched data)
-  fillSelect('billing-client-select', data.clients || []);
+  // ALL client dropdowns — use the same normalized source
+  const clients = data.clients || [];
+  console.log('[populateSelects] populating client dropdowns with', clients.length, 'clients');
+  fillSelect('billing-client-select', clients);
+  fillSelect('payment-client-select', clients);
+  fillSelect('expense-client-select', clients);
+  fillSelect('report-client-select', clients);
+  fillSelect('filter-client', clients, true);
+
+  // Direction dropdowns
+  const dirs = data.business_directions || [];
+  fillSelect('payment-direction-select', dirs);
+  fillSelect('expense-direction-select', dirs);
 
   // Billing warehouse dropdown – populate from enriched warehouses when available
   if (data.warehouses && data.warehouses.length > 0) {
@@ -230,17 +241,6 @@ function populateSelects(data) {
 
   // Filters
   fillSelect('filter-status', data.statuses || [], true);
-  fillSelect('filter-client', data.clients || [], true);
-
-  // Dependent dropdowns: direction → client → deals
-  // Billing payment section
-  fillSelect('payment-direction-select', data.business_directions || []);
-  fillSelect('payment-client-select', data.clients || []);
-  // Expenses section
-  fillSelect('expense-direction-select', data.business_directions || []);
-  fillSelect('expense-client-select', data.clients || []);
-  // Reports: billing-by-client
-  fillSelect('report-client-select', data.clients || []);
 
   // Expense category level 1 — populate from DB categories if available
   if (data.expense_categories && data.expense_categories.length > 0) {
@@ -346,18 +346,23 @@ function initDependentDealDropdowns(dirSelectId, clientSelectId, dealSelectId) {
   const dealEl   = document.getElementById(dealSelectId);
   if (!dirEl || !clientEl || !dealEl) return;
 
-  const reload = () => {
+  // Direction change: clear deal dropdown since client context may be irrelevant
+  dirEl.addEventListener('change', () => {
+    console.log('[dropdown] direction changed:', dirEl.value);
+    populateSelectFromObjects(dealEl, []);
+  });
+
+  // Client change: reload deals only when a client is actually selected
+  clientEl.addEventListener('change', () => {
     const dirId    = dirEl.value    || null;
     const clientId = clientEl.value || null;
-    if (dirId || clientId) {
+    console.log('[dropdown] client changed:', clientId, 'dir:', dirId);
+    if (clientId) {
       loadDealsFiltered(dealSelectId, dirId, clientId);
     } else {
       populateSelectFromObjects(dealEl, []);
     }
-  };
-
-  dirEl.addEventListener('change', reload);
-  clientEl.addEventListener('change', reload);
+  });
 }
 
 function updateSettingsStats(data) {
@@ -456,6 +461,7 @@ async function handleFormSubmit(e) {
   }
 
   const dealData = collectFormDataSql();
+  console.log('[deal save] payload:', dealData);
 
   setSubmitting(true);
 
@@ -516,6 +522,22 @@ function validateForm() {
     }
   });
 
+  // Validate that critical select fields contain valid numeric IDs (required for SQL endpoint)
+  [
+    { id: 'status',  label: 'Статус сделки' },
+    { id: 'client',  label: 'Клиент' },
+    { id: 'manager', label: 'Менеджер' },
+  ].forEach(({ id, label }) => {
+    const el = document.getElementById(id);
+    const val = el ? el.value.trim() : '';
+    if (val && isNaN(parseInt(val, 10))) {
+      errors.push(label);
+      const errorEl = document.getElementById(`${id}-error`);
+      if (errorEl) errorEl.textContent = 'Справочник не загружен — перезагрузите страницу';
+      if (el) el.closest('.field')?.classList.add('field--error');
+    }
+  });
+
   return errors;
 }
 
@@ -560,7 +582,9 @@ function collectFormData() {
 function collectFormDataSql() {
   const intVal = (id) => {
     const v = getFieldValue(id);
-    return v !== '' ? parseInt(v, 10) : null;
+    if (!v) return null;
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : null;
   };
   const floatVal = (id) => {
     const v = getFieldValue(id);
@@ -1270,11 +1294,17 @@ async function loadClientsSettings() {
       onDelete: () => deleteClient(item.client_id, item.client_name),
     }));
     setEl('cnt-clients', clients.length);
-    // Update select
-    const clientNames = clients.map(c => c.client_name);
-    fillSelect('client', clientNames);
-    fillSelect('filter-client', clientNames, true);
-    if (state.settings) state.settings.clients = clientNames;
+    // Use {id, name} objects so ALL client dropdowns carry numeric IDs
+    const clientItems = clients.map(c => ({ id: c.client_id, name: c.client_name }));
+    console.log('[clients] loaded', clientItems.length, 'clients from settings');
+    fillSelect('client', clientItems);
+    fillSelect('filter-client', clientItems, true);
+    fillSelect('billing-client-select', clientItems);
+    fillSelect('payment-client-select', clientItems);
+    fillSelect('expense-client-select', clientItems);
+    fillSelect('report-client-select', clientItems);
+    if (state.settings) state.settings.clients = clientItems;
+    if (state.enrichedSettings) state.enrichedSettings.clients = clientItems;
   } catch (err) {
     console.warn('Could not load clients from settings API:', err);
   }
@@ -1315,9 +1345,11 @@ async function loadManagersSettings() {
       onDelete: () => deleteManager(item.manager_id, item.manager_name),
     }));
     setEl('cnt-managers', managers.length);
-    const managerNames = managers.map(m => m.manager_name);
-    fillSelect('manager', managerNames);
-    if (state.settings) state.settings.managers = managerNames;
+    const managerItems = managers.map(m => ({ id: m.manager_id, name: m.manager_name }));
+    console.log('[managers] loaded', managerItems.length, 'managers from settings');
+    fillSelect('manager', managerItems);
+    if (state.settings) state.settings.managers = managerItems;
+    if (state.enrichedSettings) state.enrichedSettings.managers = managerItems;
   } catch (err) {
     console.warn('Could not load managers from settings API:', err);
   }
@@ -1360,8 +1392,15 @@ async function loadDirectionsSettings() {
       onDelete: () => deleteDirection(item.value),
     }));
     setEl('cnt-directions', directions.length);
-    fillSelect('business_direction', directions);
-    if (state.settings) state.settings.business_directions = directions;
+    // Prefer enriched settings with IDs; if unavailable, leave form selects empty
+    // so the form fails validation rather than sending string values as direction IDs
+    const dirItems = (state.enrichedSettings && state.enrichedSettings.business_directions && state.enrichedSettings.business_directions.length > 0)
+      ? state.enrichedSettings.business_directions
+      : [];
+    fillSelect('business_direction', dirItems);
+    fillSelect('payment-direction-select', dirItems);
+    fillSelect('expense-direction-select', dirItems);
+    if (state.settings) state.settings.business_directions = dirItems;
   } catch (err) {
     console.warn('Could not load directions from settings API:', err);
   }
@@ -1402,9 +1441,15 @@ async function loadStatusesSettings() {
       onDelete: () => deleteStatus(item.value),
     }));
     setEl('cnt-statuses', statuses.length);
-    fillSelect('status', statuses);
-    fillSelect('filter-status', statuses, true);
-    if (state.settings) state.settings.statuses = statuses;
+    // Prefer enriched settings with IDs; if unavailable, leave form selects empty
+    // so validateForm catches the missing data (string IDs would fail backend validation)
+    const statusItems = (state.enrichedSettings && state.enrichedSettings.statuses && state.enrichedSettings.statuses.length > 0)
+      ? state.enrichedSettings.statuses
+      : [];
+    fillSelect('status', statusItems);
+    fillSelect('edit-status', statusItems);
+    fillSelect('filter-status', statusItems, true);
+    if (state.settings) state.settings.statuses = statusItems;
   } catch (err) {
     console.warn('Could not load statuses from settings API:', err);
   }
@@ -2702,6 +2747,12 @@ function initDashboardHandlers() {
 }
 
 async function loadOwnerDashboard() {
+  // Guard: only load dashboard when authenticated
+  if (!localStorage.getItem('user_role')) {
+    console.warn('[dashboard] not authenticated, skipping load');
+    return;
+  }
+
   const loadingEl = document.getElementById('dashboard-loading');
   const contentEl = document.getElementById('dashboard-content');
   const emptyEl   = document.getElementById('dashboard-empty');
@@ -2713,6 +2764,7 @@ async function loadOwnerDashboard() {
   try {
     const month = document.getElementById('dashboard-month-filter')?.value || '';
     const qs = month ? `?month=${encodeURIComponent(month)}` : '';
+    console.log('[dashboard] loading summary', qs || '(no filter)');
     const rows = await apiFetch(`/dashboard/summary${qs}`);
 
     if (loadingEl) loadingEl.style.display = 'none';
