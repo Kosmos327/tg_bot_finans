@@ -192,7 +192,24 @@ async def create_deal(
         raise HTTPException(status_code=403, detail="Access denied: insufficient role")
 
     params = body.model_dump()
-    # Build the SQL function call with all parameters
+    # PARAMETER ORDER IS CRITICAL — asyncpg translates each SQLAlchemy named bind
+    # param (:name) into a positional $N placeholder in the order they first appear
+    # in this SQL string.  That positional order MUST match the PostgreSQL function
+    # signature of public.api_create_deal:
+    #   1. p_status_id              2. p_business_direction_id
+    #   3. p_client_id              4. p_manager_id
+    #   5. p_charged_with_vat       6. p_charged_without_vat
+    #   7. p_vat_type_id            8. p_vat_rate
+    #   9. p_paid                  10. p_project_start_date
+    #  11. p_project_end_date      12. p_act_date
+    #  13. p_variable_expense_1_without_vat
+    #  14. p_variable_expense_2_without_vat
+    #  15. p_production_expense_without_vat
+    #  16. p_manager_bonus_percent  17. p_source_id
+    #  18. p_document_link         19. p_comment
+    #
+    # Do NOT reorder these params — swapping :manager_id/:charged_with_vat caused
+    # the FK violation "Key (manager_id)=(123) is not present in table managers".
     sql = (
         "SELECT * FROM public.api_create_deal("
         ":status_id, :business_direction_id, :client_id, :manager_id, "
