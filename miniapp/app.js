@@ -1680,8 +1680,19 @@ async function loginWithTelegram() {
     localStorage.setItem('user_role', result.role);
     console.log('[loginWithTelegram] success: telegram_id=%s role=%s', result.telegram_id, result.role);
   } catch (err) {
-    console.warn('[loginWithTelegram] failed:', err.message);
-    showToast('Telegram authentication failed', 'error');
+    // 403 "User not registered" is expected on first launch – the user will be
+    // directed to the auth screen to complete first-time registration.
+    // Only show a toast for unexpected errors (network failures, 5xx, etc.).
+    const isNotRegistered = err.message && (
+      err.message.includes('not registered') ||
+      err.message.includes('Please log in')
+    );
+    if (isNotRegistered) {
+      console.log('[loginWithTelegram] user not yet registered – auth screen will handle registration');
+    } else {
+      console.warn('[loginWithTelegram] failed:', err.message);
+      showToast('Ошибка входа через Telegram', 'error');
+    }
   }
 }
 
@@ -1873,9 +1884,13 @@ function initAuthHandlers() {
         });
         role = result.role;
         roleLabel = ROLE_LABELS[role] || role;
-        if (telegramId) {
-          localStorage.setItem('telegram_id', String(telegramId));
-          console.log('[auth] telegram_id saved to localStorage:', telegramId);
+        // Use the backend-returned telegram_id as the authoritative value.
+        // This ensures telegram_id is always stored even if the local userSource
+        // was constructed from tg.initDataUnsafe (which may differ in edge cases).
+        const storedTelegramId = result.telegram_id || telegramId;
+        if (storedTelegramId) {
+          localStorage.setItem('telegram_id', String(storedTelegramId));
+          console.log('[auth] telegram_id saved to localStorage:', storedTelegramId);
         }
       } else {
         // Fallback path: no Telegram context (e.g. dev/testing environment)
