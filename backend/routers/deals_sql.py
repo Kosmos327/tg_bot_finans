@@ -192,28 +192,59 @@ async def create_deal(
         raise HTTPException(status_code=403, detail="Access denied: insufficient role")
 
     params = body.model_dump()
+    # Resolve created_by_user_id from auth context: integer app_users.id when
+    # authenticated via Telegram, None for web/browser mode (no Telegram session).
+    created_by_user_id = user_id if isinstance(user_id, int) else None
+    params["created_by_user_id"] = created_by_user_id
+
+    # Defensive validation for manager role: resolve the authenticated manager's
+    # DB record and use it as the authoritative manager_id, overriding any
+    # value submitted by the frontend. This prevents managers from creating deals
+    # attributed to a different manager.
+    if role == "manager":
+        caller_tid = _get_caller_telegram_id(x_telegram_id, x_telegram_init_data)
+        if caller_tid:
+            from sqlalchemy import select as _select
+            from app.database.models import Manager as _Manager
+            mgr_result = await db.execute(
+                _select(_Manager).where(_Manager.telegram_user_id == caller_tid)
+            )
+            mgr = mgr_result.scalar_one_or_none()
+            if mgr is not None:
+                if params.get("manager_id") != mgr.id:
+                    logger.warning(
+                        "create_deal: manager_id mismatch for telegram_id=%s "
+                        "(submitted=%s, authenticated=%s) – using authenticated value",
+                        caller_tid,
+                        params.get("manager_id"),
+                        mgr.id,
+                    )
+                params["manager_id"] = mgr.id
+
     # PARAMETER ORDER IS CRITICAL — asyncpg translates each SQLAlchemy named bind
     # param (:name) into a positional $N placeholder in the order they first appear
     # in this SQL string.  That positional order MUST match the PostgreSQL function
     # signature of public.api_create_deal:
-    #   1. p_status_id              2. p_business_direction_id
-    #   3. p_client_id              4. p_manager_id
-    #   5. p_charged_with_vat       6. p_charged_without_vat
-    #   7. p_vat_type_id            8. p_vat_rate
-    #   9. p_paid                  10. p_project_start_date
-    #  11. p_project_end_date      12. p_act_date
+    #   1. p_created_by_user_id    2. p_status_id
+    #   3. p_business_direction_id 4. p_client_id
+    #   5. p_manager_id            6. p_charged_with_vat
+    #   7. p_vat_type_id           8. p_vat_rate
+    #   9. p_paid                 10. p_project_start_date
+    #  11. p_project_end_date     12. p_act_date
     #  13. p_variable_expense_1_without_vat
     #  14. p_variable_expense_2_without_vat
     #  15. p_production_expense_without_vat
-    #  16. p_manager_bonus_percent  17. p_source_id
-    #  18. p_document_link         19. p_comment
+    #  16. p_manager_bonus_percent 17. p_source_id
+    #  18. p_document_link        19. p_comment
     #
-    # Do NOT reorder these params — swapping :manager_id/:charged_with_vat caused
-    # the FK violation "Key (manager_id)=(123) is not present in table managers".
+    # NOTE: p_charged_without_vat does NOT exist in the SQL function signature.
+    # Do NOT reorder these params — the original code was missing
+    # p_created_by_user_id (first arg) and had a spurious :charged_without_vat
+    # in position 6, which shifted all subsequent arguments and caused FK violations.
     sql = (
         "SELECT * FROM public.api_create_deal("
-        ":status_id, :business_direction_id, :client_id, :manager_id, "
-        ":charged_with_vat, :charged_without_vat, :vat_type_id, :vat_rate, "
+        ":created_by_user_id, :status_id, :business_direction_id, :client_id, :manager_id, "
+        ":charged_with_vat, :vat_type_id, :vat_rate, "
         ":paid, :project_start_date, :project_end_date, :act_date, "
         ":variable_expense_1_without_vat, :variable_expense_2_without_vat, "
         ":production_expense_without_vat, :manager_bonus_percent, "

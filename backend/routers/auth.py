@@ -45,6 +45,8 @@ class MiniAppLoginRequest(BaseModel):
     username: Optional[str] = None
     selected_role: Optional[str] = None
     password: Optional[str] = None
+    # Required when selected_role is "manager": "ekaterina" or "yulia"
+    selected_manager: Optional[str] = None
 
 
 class MiniAppLoginResponse(BaseModel):
@@ -53,6 +55,7 @@ class MiniAppLoginResponse(BaseModel):
     full_name: str
     username: Optional[str] = None
     role: str
+    manager_id: Optional[int] = None
 
 
 @router.post("/miniapp-login", response_model=MiniAppLoginResponse)
@@ -157,6 +160,7 @@ async def miniapp_login_endpoint(
             username=body.username,
             selected_role=body.selected_role,
             password=body.password,
+            selected_manager=body.selected_manager,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -165,6 +169,8 @@ async def miniapp_login_endpoint(
             status_code=403,
             detail=f"Invalid password for role '{body.selected_role}'",
         ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return MiniAppLoginResponse(**result)
 
