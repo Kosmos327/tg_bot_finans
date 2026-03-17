@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.database import get_db
 from backend.services import deals_service, settings_service
 from backend.services.db_exec import read_sql_view
-from backend.services.miniapp_auth_service import get_user_by_telegram_id, get_role_code
+from backend.services.miniapp_auth_service import get_user_by_telegram_id, get_role_code, resolve_user_from_init_data
 from backend.services.permissions import (
     NO_ACCESS_ROLE,
     FINANCE_VIEW_ROLES,
@@ -27,14 +27,25 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 def _resolve_user(
     init_data: Optional[str], role_header: Optional[str] = None
 ) -> tuple:
-    """Return (user_id, role, full_name) from Telegram initData or X-User-Role header."""
+    """Return (user_id, role, full_name) from Telegram initData or X-User-Role header.
+
+    When initData is present but the Sheets-based role lookup returns NO_ACCESS_ROLE
+    (user migrated to PostgreSQL-only), fall through to the X-User-Role header so
+    that authenticated sessions continue to work.
+
+    Returns:
+        - (user_id_str, role_code, full_name) when resolved via initData + Sheets lookup.
+        - ("", role_code, "") when resolved via X-User-Role header fallback.
+        - ("", NO_ACCESS_ROLE, "") when no auth information can be resolved.
+    """
     if init_data:
         user = extract_user_from_init_data(init_data)
         if user:
             user_id = str(user.get("id", ""))
             role = settings_service.get_user_role(user_id) if user_id else NO_ACCESS_ROLE
             full_name = settings_service.get_user_full_name(user_id) if user_id else ""
-            return user_id, role, full_name
+            if role != NO_ACCESS_ROLE:
+                return user_id, role, full_name
 
     if role_header and role_header.strip():
         role = role_header.strip().lower()
@@ -370,19 +381,37 @@ async def owner_dashboard(
 async def _resolve_user_db(
     db: AsyncSession,
     x_telegram_id: Optional[str],
+    x_telegram_init_data: Optional[str] = None,
+    x_user_role: Optional[str] = None,
 ) -> tuple:
-    """Resolve (user_id, role, full_name) from app_users by X-Telegram-Id."""
-    if not x_telegram_id:
-        return None, NO_ACCESS_ROLE, ""
-    try:
-        tid = int(x_telegram_id.strip())
-    except (ValueError, TypeError):
-        return None, NO_ACCESS_ROLE, ""
-    user = await get_user_by_telegram_id(db, tid)
-    if user is None:
-        return None, NO_ACCESS_ROLE, ""
-    role = await get_role_code(db, user.role_id)
-    return user.id, role or NO_ACCESS_ROLE, user.full_name
+    """Resolve (user_id, role, full_name) from app_users with fallback chain.
+
+    1. X-Telegram-Id header → app_users lookup (primary, fastest path).
+    2. X-Telegram-Init-Data header → HMAC-validated initData → app_users lookup.
+    3. X-User-Role header → role accepted as-is (for sessions that set the role
+       in localStorage after a successful /auth/miniapp-login but where the
+       telegram_id was not available in the current request context).
+    """
+    if x_telegram_id:
+        try:
+            tid = int(x_telegram_id.strip())
+        except (ValueError, TypeError):
+            return None, NO_ACCESS_ROLE, ""
+        user = await get_user_by_telegram_id(db, tid)
+        if user is None:
+            return None, NO_ACCESS_ROLE, ""
+        role = await get_role_code(db, user.role_id)
+        return user.id, role or NO_ACCESS_ROLE, user.full_name
+
+    if x_telegram_init_data:
+        return await resolve_user_from_init_data(db, x_telegram_init_data)
+
+    if x_user_role and x_user_role.strip():
+        role = x_user_role.strip().lower()
+        if role in ALLOWED_ROLES:
+            return "", role, ""
+
+    return None, NO_ACCESS_ROLE, ""
 
 
 @router.get("/summary", response_model=List[Dict[str, Any]])
@@ -390,13 +419,17 @@ async def dashboard_summary(
     month: Optional[str] = Query(default=None, description="Filter by month YYYY-MM"),
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
+    x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
 ) -> List[Dict[str, Any]]:
     """
     Return summary data from public.v_dashboard_summary.
 
     Accessible by: operations_director, accounting, admin.
     """
-    user_id, role, full_name = await _resolve_user_db(db, x_telegram_id)
+    user_id, role, full_name = await _resolve_user_db(
+        db, x_telegram_id, x_telegram_init_data, x_user_role
+    )
 
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")

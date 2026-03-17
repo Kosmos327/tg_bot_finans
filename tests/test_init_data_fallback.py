@@ -291,3 +291,170 @@ class TestMonthCloseResolveUserFallback:
                 db, x_telegram_id=None, x_telegram_init_data=init_data
             )
         assert role == "admin"
+
+
+# ---------------------------------------------------------------------------
+# Tests: dashboard._resolve_user_db (new fallback chain)
+# ---------------------------------------------------------------------------
+
+class TestDashboardResolveUserDb:
+    """Tests for dashboard._resolve_user_db with init_data and role fallbacks."""
+
+    BOT_TOKEN = "test_bot_token_123"
+
+    @pytest.mark.asyncio
+    async def test_resolves_via_telegram_id(self):
+        from backend.routers.dashboard import _resolve_user_db
+        user = _mock_app_user(telegram_id=11111, role_id=2)
+        role_obj = _mock_role(role_id=2, code="operations_director")
+        db = _make_db(user=user, role=role_obj)
+        user_id, role, full_name = await _resolve_user_db(db, x_telegram_id="11111")
+        assert role == "operations_director"
+        assert user_id == 10
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_init_data_when_no_telegram_id(self):
+        from backend.routers.dashboard import _resolve_user_db
+        user = _mock_app_user(telegram_id=22222, role_id=2)
+        role_obj = _mock_role(role_id=2, code="operations_director")
+        db = _make_db(user=user, role=role_obj)
+        init_data = _build_init_data(self.BOT_TOKEN, user_id=22222)
+        with patch("backend.services.miniapp_auth_service.settings") as mock_settings:
+            mock_settings.telegram_bot_token = self.BOT_TOKEN
+            user_id, role, full_name = await _resolve_user_db(
+                db, x_telegram_id=None, x_telegram_init_data=init_data
+            )
+        assert role == "operations_director"
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_user_role_header(self):
+        from backend.routers.dashboard import _resolve_user_db
+        from backend.services.permissions import NO_ACCESS_ROLE
+        db = _make_db(user=None)
+        user_id, role, full_name = await _resolve_user_db(
+            db, x_telegram_id=None, x_telegram_init_data=None, x_user_role="admin"
+        )
+        assert role == "admin"
+
+    @pytest.mark.asyncio
+    async def test_returns_no_access_when_all_absent(self):
+        from backend.routers.dashboard import _resolve_user_db
+        from backend.services.permissions import NO_ACCESS_ROLE
+        db = _make_db(user=None)
+        user_id, role, full_name = await _resolve_user_db(
+            db, x_telegram_id=None, x_telegram_init_data=None, x_user_role=None
+        )
+        assert role == NO_ACCESS_ROLE
+
+    @pytest.mark.asyncio
+    async def test_prefers_telegram_id_over_init_data(self):
+        from backend.routers.dashboard import _resolve_user_db
+        user = _mock_app_user(telegram_id=11111, role_id=2)
+        role_obj = _mock_role(role_id=2, code="operations_director")
+        db = _make_db(user=user, role=role_obj)
+        init_data = _build_init_data(self.BOT_TOKEN, user_id=99999)
+        with patch("backend.services.miniapp_auth_service.settings") as mock_settings:
+            mock_settings.telegram_bot_token = self.BOT_TOKEN
+            user_id, role, full_name = await _resolve_user_db(
+                db, x_telegram_id="11111", x_telegram_init_data=init_data
+            )
+        assert role == "operations_director"
+        assert user_id == 10
+
+
+# ---------------------------------------------------------------------------
+# Tests: dashboard._resolve_user early-return bug fix
+# ---------------------------------------------------------------------------
+
+class TestDashboardResolveUserLegacy:
+    """Tests for dashboard._resolve_user – verifies X-User-Role fallback is reached
+    when initData is present but Sheets-based role lookup returns NO_ACCESS_ROLE."""
+
+    def test_falls_through_to_role_header_when_sheets_returns_no_access(self):
+        from backend.routers.dashboard import _resolve_user
+        from backend.services.permissions import NO_ACCESS_ROLE
+        # Simulate a valid initData that can be parsed but Sheets returns NO_ACCESS_ROLE
+        with patch("backend.routers.dashboard.extract_user_from_init_data") as mock_extract, \
+             patch("backend.routers.dashboard.settings_service") as mock_svc:
+            mock_extract.return_value = {"id": 55555, "first_name": "Test"}
+            mock_svc.get_user_role.return_value = NO_ACCESS_ROLE
+            mock_svc.get_user_full_name.return_value = ""
+            user_id, role, full_name = _resolve_user(
+                init_data="fake_init_data", role_header="admin"
+            )
+        assert role == "admin"
+
+    def test_returns_no_access_when_no_headers(self):
+        from backend.routers.dashboard import _resolve_user
+        from backend.services.permissions import NO_ACCESS_ROLE
+        user_id, role, full_name = _resolve_user(init_data=None, role_header=None)
+        assert role == NO_ACCESS_ROLE
+
+    def test_returns_sheets_role_when_user_found_in_sheets(self):
+        from backend.routers.dashboard import _resolve_user
+        from backend.services.permissions import NO_ACCESS_ROLE
+        with patch("backend.routers.dashboard.extract_user_from_init_data") as mock_extract, \
+             patch("backend.routers.dashboard.settings_service") as mock_svc:
+            mock_extract.return_value = {"id": 12345, "first_name": "Alice"}
+            mock_svc.get_user_role.return_value = "operations_director"
+            mock_svc.get_user_full_name.return_value = "Alice"
+            user_id, role, full_name = _resolve_user(
+                init_data="valid_init_data", role_header="manager"
+            )
+        # initData path found a role in Sheets – should return that role
+        assert role == "operations_director"
+
+
+# ---------------------------------------------------------------------------
+# Tests: receivables._resolve_user early-return bug fix
+# ---------------------------------------------------------------------------
+
+class TestReceivablesResolveUser:
+    """Tests for receivables._resolve_user – verifies X-User-Role fallback is reached
+    when initData is present but Sheets-based role lookup returns NO_ACCESS_ROLE."""
+
+    def test_falls_through_to_role_header_when_sheets_returns_no_access(self):
+        from backend.routers.receivables import _resolve_user
+        from backend.services.permissions import NO_ACCESS_ROLE
+        with patch("backend.routers.receivables.extract_user_from_init_data") as mock_extract, \
+             patch("backend.routers.receivables.settings_service") as mock_svc:
+            mock_extract.return_value = {"id": 66666, "first_name": "Bob"}
+            mock_svc.get_user_role.return_value = NO_ACCESS_ROLE
+            mock_svc.get_user_full_name.return_value = ""
+            _, role, _ = _resolve_user(
+                init_data="fake_init_data", role_header="accounting"
+            )
+        assert role == "accounting"
+
+    def test_returns_no_access_when_no_headers(self):
+        from backend.routers.receivables import _resolve_user
+        from backend.services.permissions import NO_ACCESS_ROLE
+        _, role, _ = _resolve_user(init_data=None, role_header=None)
+        assert role == NO_ACCESS_ROLE
+
+
+# ---------------------------------------------------------------------------
+# Tests: journal._resolve_user early-return bug fix
+# ---------------------------------------------------------------------------
+
+class TestJournalResolveUser:
+    """Tests for journal._resolve_user – verifies X-User-Role fallback is reached
+    when initData is present but Sheets-based role lookup returns NO_ACCESS_ROLE."""
+
+    def test_falls_through_to_role_header_when_sheets_returns_no_access(self):
+        from backend.routers.journal import _resolve_user
+        from backend.services.permissions import NO_ACCESS_ROLE
+        with patch("backend.routers.journal.extract_user_from_init_data") as mock_extract, \
+             patch("backend.routers.journal.settings_service") as mock_svc:
+            mock_extract.return_value = {"id": 77777, "first_name": "Carol"}
+            mock_svc.get_user_role.return_value = NO_ACCESS_ROLE
+            _, role = _resolve_user(
+                init_data="fake_init_data", role_header="operations_director"
+            )
+        assert role == "operations_director"
+
+    def test_returns_no_access_when_no_headers(self):
+        from backend.routers.journal import _resolve_user
+        from backend.services.permissions import NO_ACCESS_ROLE
+        _, role = _resolve_user(init_data=None, role_header=None)
+        assert role == NO_ACCESS_ROLE
