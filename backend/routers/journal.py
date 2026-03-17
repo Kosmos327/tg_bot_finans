@@ -57,13 +57,24 @@ _NEW_JOURNAL_FIELDS = [
 # ---------------------------------------------------------------------------
 
 def _resolve_user(init_data: Optional[str], role_header: Optional[str] = None) -> tuple:
-    """Return (user_id, role) from Telegram initData or X-User-Role header."""
+    """Return (user_id, role) from Telegram initData or X-User-Role header.
+
+    When initData is present but the Sheets-based role lookup returns NO_ACCESS_ROLE
+    (user migrated to PostgreSQL-only), fall through to the X-User-Role header so
+    that authenticated sessions continue to work.
+
+    Returns:
+        - (user_id_str, role_code) when resolved via initData + Sheets lookup.
+        - ("", role_code) when resolved via X-User-Role header fallback.
+        - ("", NO_ACCESS_ROLE) when no auth information can be resolved.
+    """
     if init_data:
         user = extract_user_from_init_data(init_data)
         if user:
             user_id = str(user.get("id", ""))
             role = settings_service.get_user_role(user_id) if user_id else NO_ACCESS_ROLE
-            return user_id, role
+            if role != NO_ACCESS_ROLE:
+                return user_id, role
 
     if role_header and role_header.strip():
         role = role_header.strip().lower()
