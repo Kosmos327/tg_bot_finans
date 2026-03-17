@@ -2496,7 +2496,8 @@ async function saveBilling() {
   // Use /billing/v2/upsert when enriched settings provide warehouse and client IDs.
   const warehouseId = parseInt(warehouseVal, 10);
   const clientId = parseInt(clientVal, 10);
-  const useV2 = state.enrichedSettings && !isNaN(warehouseId) && !isNaN(clientId);
+  const useV2 = state.enrichedSettings && Number.isFinite(warehouseId) && warehouseId > 0
+                && Number.isFinite(clientId) && clientId > 0;
 
   if (useV2 && (fmt === 'new' || fmt === 'new-no-vat')) {
     // SQL-function path: /billing/v2/upsert
