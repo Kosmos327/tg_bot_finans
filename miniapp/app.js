@@ -604,6 +604,7 @@ async function handleFormSubmit(e) {
   }
 
   const dealData = collectFormDataSql();
+  console.log('[deal save] final manager_id:', dealData.manager_id);
   console.log('[deal save] payload:', dealData);
 
   setSubmitting(true);
@@ -734,11 +735,23 @@ function collectFormDataSql() {
     return v !== '' ? parseFloat(v) : null;
   };
 
+  // For manager role: use the manager_id stored during login (from backend ENV).
+  // For other roles (admin, accounting, operations_director): use the form field selection.
+  const currentRole = localStorage.getItem('user_role') || '';
+  let managerId;
+  if (currentRole === 'manager') {
+    const stored = localStorage.getItem('manager_id');
+    const parsed = stored ? parseInt(stored, 10) : NaN;
+    managerId = Number.isFinite(parsed) ? parsed : null;
+  } else {
+    managerId = intVal('manager');
+  }
+
   return {
     status_id: intVal('status'),
     business_direction_id: intVal('business_direction'),
     client_id: intVal('client'),
-    manager_id: intVal('manager'),
+    manager_id: managerId,
     charged_with_vat: floatVal('charged_with_vat'),
     vat_type_id: intVal('vat_type'),
     vat_rate: floatVal('vat_rate'),
