@@ -2538,8 +2538,14 @@ async function saveBilling() {
     return;
   }
 
-  // Legacy path: /billing/{warehouse} (used when warehouse/client have text values
-  // or when the old p1/p2 format is selected)
+  // Legacy path: /billing/{warehouse} (only for old p1/p2 format)
+  // For 'new' and 'new-no-vat' formats the v2 path above is required; if we reach
+  // here with those formats it means numeric IDs were unavailable, so abort with a
+  // clear error instead of calling the legacy /billing/<warehouse> endpoint.
+  if (fmt === 'new' || fmt === 'new-no-vat') {
+    showToast('Не удалось определить ID склада/клиента. Обновите страницу и попробуйте снова.', 'error');
+    return;
+  }
   const warehouse = warehouseVal;
   const clientName = clientVal;
   let body;
