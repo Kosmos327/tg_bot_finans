@@ -277,3 +277,149 @@ class TestUpsertAppUserSql:
         )
         # Should have tried to create user via ORM (add was called)
         assert db.add.called
+
+
+# ---------------------------------------------------------------------------
+# Regression: create_deal parameter-order bug
+# Bug: charged_with_vat=123 was landing in p_manager_id because the SQL call
+# had the positional params in the wrong order.
+# Fix: named SQLAlchemy bind params (:manager_id, :charged_with_vat) in the
+# correct order so asyncpg's positional $N mapping is unambiguous.
+# ---------------------------------------------------------------------------
+
+class TestDealCreateParameterOrder:
+    """
+    Regression tests for the parameter-order bug in POST /deals/create.
+
+    Symptoms: frontend sends manager_id=1 and charged_with_vat=123, but
+    PostgreSQL raises: Key (manager_id)=(123) is not present in table "managers"
+
+    Root cause: asyncpg converts named SQLAlchemy bind params (:name) to
+    positional $N placeholders in the ORDER they first appear in the SQL string.
+    If :charged_with_vat appeared before :manager_id, the value 123 would be
+    passed as $4 → p_manager_id, triggering the FK violation.
+    """
+
+    def test_sql_has_manager_id_before_charged_with_vat(self):
+        """
+        The SQL template in create_deal must have :manager_id before
+        :charged_with_vat so asyncpg's positional $4/:manager_id maps
+        correctly to p_manager_id in the SQL function.
+        """
+        import inspect
+        from backend.routers.deals_sql import create_deal
+
+        source = inspect.getsource(create_deal)
+
+        manager_pos = source.find(":manager_id")
+        charged_pos = source.find(":charged_with_vat")
+
+        assert manager_pos != -1, ":manager_id not found in create_deal source"
+        assert charged_pos != -1, ":charged_with_vat not found in create_deal source"
+        assert manager_pos < charged_pos, (
+            "BUG: :manager_id appears AFTER :charged_with_vat in the SQL — "
+            "asyncpg will swap their $N positions and charged_with_vat will "
+            "be passed as p_manager_id, causing FK violations."
+        )
+
+    def test_model_dump_does_not_swap_manager_id_and_charged_with_vat(self):
+        """
+        model_dump() must return manager_id=1 and charged_with_vat=123 with
+        distinct, unswapped values so that named bind param lookup is correct.
+        """
+        from backend.schemas.deals import DealCreateRequest
+
+        req = DealCreateRequest(
+            status_id=1,
+            business_direction_id=2,
+            client_id=3,
+            manager_id=1,
+            charged_with_vat=Decimal("123"),
+        )
+        params = req.model_dump()
+
+        assert params["manager_id"] == 1, (
+            f"manager_id should be 1, got {params['manager_id']!r} — "
+            "values may have been swapped during model construction"
+        )
+        assert params["charged_with_vat"] == Decimal("123"), (
+            f"charged_with_vat should be Decimal('123'), got {params['charged_with_vat']!r}"
+        )
+        assert params["manager_id"] != params["charged_with_vat"], (
+            "manager_id and charged_with_vat have the same value — cannot detect a swap"
+        )
+
+    @pytest.mark.asyncio
+    async def test_create_deal_endpoint_binds_manager_id_and_charged_with_vat_correctly(self):
+        """
+        End-to-end regression: POST /deals/create must pass manager_id=1 and
+        charged_with_vat=123 to call_sql_function_one without swapping them.
+
+        This is the primary guard against the original FK bug where
+        charged_with_vat=123 was sent as p_manager_id to the SQL function.
+        """
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured: dict = {}
+
+        async def capture_params(db, sql, params):
+            captured["sql"] = sql
+            captured["params"] = dict(params)
+            return {"id": 42, "deal_id": "DEAL-000042", "status": "Новая"}
+
+        # Provide a no-op async DB session so get_db doesn't attempt a real connection
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                    "backend.routers.deals_sql.call_sql_function_one",
+                    new_callable=AsyncMock,
+                    side_effect=capture_params,
+                ):
+                with patch(
+                    "backend.routers.deals_sql._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=(1, "admin", "Test Admin"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.post(
+                        "/deals/create",
+                        json={
+                            "status_id": 1,
+                            "business_direction_id": 2,
+                            "client_id": 3,
+                            "manager_id": 1,
+                            "charged_with_vat": 123,
+                        },
+                        headers={"X-User-Role": "admin"},
+                    )
+                    assert resp.status_code == 200, (
+                        f"Expected 200, got {resp.status_code}: {resp.text}"
+                    )
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured, "call_sql_function_one was never called — route did not reach the SQL layer"
+
+        params = captured["params"]
+        assert params["manager_id"] == 1, (
+            f"BUG: manager_id should be 1 but got {params.get('manager_id')!r} "
+            f"(charged_with_vat={params.get('charged_with_vat')!r}) — "
+            "manager_id and charged_with_vat are swapped in the SQL call"
+        )
+        assert params["charged_with_vat"] == Decimal("123"), (
+            f"BUG: charged_with_vat should be Decimal('123') but got "
+            f"{params.get('charged_with_vat')!r}"
+        )
+        # Confirm SQL contains named params in the right order
+        sql = captured["sql"]
+        assert ":manager_id" in sql, ":manager_id bind param missing from SQL"
+        assert ":charged_with_vat" in sql, ":charged_with_vat bind param missing from SQL"
+        assert sql.index(":manager_id") < sql.index(":charged_with_vat"), (
+            "BUG: :manager_id appears after :charged_with_vat in the captured SQL — "
+            "parameter order mismatch will cause FK violation at runtime"
+        )
