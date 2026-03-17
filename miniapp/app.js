@@ -22,6 +22,13 @@ const BILLING_INPUT_MODE_WITH_VAT    = 'Новый (с НДС)';
 const BILLING_INPUT_MODE_WITHOUT_VAT = 'Новый (без НДС)';
 const BILLING_INPUT_MODE_OLD         = 'Старый (p1/p2)';
 
+// Fallback lists used when enriched settings return an empty array.
+// [] means no hardcoded defaults are available; the constants exist so the
+// fallback intent is explicit and the value can be extended without touching
+// the selection logic.
+const FALLBACK_WAREHOUSES = [];
+const FALLBACK_CLIENTS    = [];
+
 // ==========================================
 // TELEGRAM WEB APP INIT
 // ==========================================
@@ -332,8 +339,15 @@ function populateSelects(data) {
     }
   }
 
-  // ALL client dropdowns — use the same normalized source
-  const clients = data.clients || [];
+  // ALL client dropdowns — use the same normalized source.
+  // Array.isArray + length check is required because [] is truthy, so the
+  // plain `||` operator would return [] instead of FALLBACK_CLIENTS when the
+  // API responds with an empty array.
+  const clients =
+    Array.isArray(state.enrichedSettings?.clients) &&
+    state.enrichedSettings.clients.length > 0
+      ? state.enrichedSettings.clients
+      : FALLBACK_CLIENTS;
   console.log('[populateSelects] populating client dropdowns with', clients.length, 'clients');
   fillSelect('billing-client-select', clients);
   fillSelect('payment-client-select', clients);
@@ -346,15 +360,19 @@ function populateSelects(data) {
   fillSelect('payment-direction-select', dirs);
   fillSelect('expense-direction-select', dirs);
 
-  // Billing warehouse dropdown – always populate from enriched warehouses
-  // Use state.enrichedSettings.warehouses (canonical normalized source, set by normalizeSettings
-  // before populateSelects is called) so that the dropdown is filled whenever the API
-  // succeeded, regardless of whether the raw data reference is stale.
-  const warehousesForSelect = (state.enrichedSettings?.warehouses || data.warehouses || [])
-    .map(w => ({
-      id: w.id,
-      name: `${(w.code || '').toUpperCase()} — ${w.name}`,
-    }));
+  // Billing warehouse dropdown – always populate from enriched warehouses.
+  // Array.isArray + length check is required because [] is truthy, so the
+  // plain `||` operator would return [] instead of FALLBACK_WAREHOUSES when
+  // the API responds with an empty array.
+  const warehouses =
+    Array.isArray(state.enrichedSettings?.warehouses) &&
+    state.enrichedSettings.warehouses.length > 0
+      ? state.enrichedSettings.warehouses
+      : FALLBACK_WAREHOUSES;
+  const warehousesForSelect = warehouses.map(w => ({
+    id: w.id,
+    name: `${(w.code || '').toUpperCase()} — ${w.name}`,
+  }));
   console.log('[billing warehouse fill input]', warehousesForSelect);
   fillSelect('billing-warehouse', warehousesForSelect);
   console.log('[billing warehouse option count]', document.getElementById('billing-warehouse')?.options?.length);
