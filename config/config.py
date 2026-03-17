@@ -11,6 +11,15 @@ Optional environment variables:
   API_BASE_URL        - Public URL of the backend API
                         (frontend falls back to same-origin if not set)
 
+  ROLE_PASSWORD_OPERATIONS_DIRECTOR  – Web auth password for operations_director
+  ROLE_PASSWORD_ACCOUNTING           – Web auth password for accounting
+  ROLE_PASSWORD_ADMIN                – Web auth password for admin
+
+  PASSWORD_MANAGER_EKATERINA – Web-mode password for manager Екатерина
+  ID_MANAGER_EKATERINA       – Manager ID (managers table PK) for Екатерина
+  PASSWORD_MANAGER_YULIA     – Web-mode password for manager Юлия
+  ID_MANAGER_YULIA           – Manager ID (managers table PK) for Юлия
+
 For local development, copy .env.example to .env and fill in the values.
 Production deployments should inject variables directly; no .env file is needed.
 """
@@ -28,6 +37,17 @@ class Settings(BaseSettings):
     webapp_url: str = ""
     database_url: str = ""
     api_base_url: str = ""
+
+    # Role passwords for web (browser) auth — role-login endpoint
+    role_password_operations_director: str = ""
+    role_password_accounting: str = ""
+    role_password_admin: str = ""
+
+    # Manager-specific credentials for web (browser) auth
+    password_manager_ekaterina: str = ""
+    id_manager_ekaterina: str = ""
+    password_manager_yulia: str = ""
+    id_manager_yulia: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",
