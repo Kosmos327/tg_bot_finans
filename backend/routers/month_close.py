@@ -23,7 +23,7 @@ from backend.schemas.month_close import (
     CloseMonthRequest,
 )
 from backend.services.db_exec import call_sql_function, read_sql_view
-from backend.services.miniapp_auth_service import get_user_by_telegram_id, get_role_code
+from backend.services.miniapp_auth_service import get_user_by_telegram_id, get_role_code, resolve_user_from_init_data
 from backend.services.permissions import NO_ACCESS_ROLE
 
 logger = logging.getLogger(__name__)
@@ -41,18 +41,30 @@ _MONTH_CLOSE_ROLES = ("operations_director", "admin")
 async def _resolve_user(
     db: AsyncSession,
     x_telegram_id: Optional[str],
+    x_telegram_init_data: Optional[str] = None,
 ) -> tuple:
-    if not x_telegram_id:
-        return None, NO_ACCESS_ROLE, ""
-    try:
-        tid = int(x_telegram_id.strip())
-    except (ValueError, TypeError):
-        return None, NO_ACCESS_ROLE, ""
-    user = await get_user_by_telegram_id(db, tid)
-    if user is None:
-        return None, NO_ACCESS_ROLE, ""
-    role = await get_role_code(db, user.role_id)
-    return user.id, role or NO_ACCESS_ROLE, user.full_name
+    """
+    Resolve (user_id, role_code, full_name) from app_users.
+
+    Primary path: X-Telegram-Id header.
+    Fallback path: X-Telegram-Init-Data header (HMAC-validated).
+    Returns (None, NO_ACCESS_ROLE, "") on failure.
+    """
+    if x_telegram_id:
+        try:
+            tid = int(x_telegram_id.strip())
+        except (ValueError, TypeError):
+            return None, NO_ACCESS_ROLE, ""
+        user = await get_user_by_telegram_id(db, tid)
+        if user is None:
+            return None, NO_ACCESS_ROLE, ""
+        role = await get_role_code(db, user.role_id)
+        return user.id, role or NO_ACCESS_ROLE, user.full_name
+
+    if x_telegram_init_data:
+        return await resolve_user_from_init_data(db, x_telegram_init_data)
+
+    return None, NO_ACCESS_ROLE, ""
 
 
 def _require_month_close_role(role: str) -> None:
@@ -72,6 +84,7 @@ async def archive_month(
     body: ArchiveMonthRequest,
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
+    x_telegram_init_data: Optional[str] = Header(default=None),
 ) -> List[Dict[str, Any]]:
     """
     Archive a month via public.archive_month(year, month, dry_run).
@@ -79,7 +92,7 @@ async def archive_month(
     dry_run=true runs the check without making changes.
     Accessible by: operations_director, admin.
     """
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
     _require_month_close_role(role)
@@ -100,13 +113,14 @@ async def cleanup_month(
     body: CleanupMonthRequest,
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
+    x_telegram_init_data: Optional[str] = Header(default=None),
 ) -> List[Dict[str, Any]]:
     """
     Clean up staging data for a month via public.cleanup_month(year, month).
 
     Accessible by: operations_director, admin.
     """
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
     _require_month_close_role(role)
@@ -127,13 +141,14 @@ async def close_month(
     body: CloseMonthRequest,
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
+    x_telegram_init_data: Optional[str] = Header(default=None),
 ) -> List[Dict[str, Any]]:
     """
     Close a month via public.close_month(year, month, comment).
 
     Accessible by: operations_director, admin.
     """
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
     _require_month_close_role(role)
@@ -155,13 +170,14 @@ async def get_archive_batches(
     month: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
+    x_telegram_init_data: Optional[str] = Header(default=None),
 ) -> List[Dict[str, Any]]:
     """
     Return archive batch records from public.archive_batches.
 
     Accessible by: operations_director, accounting, admin.
     """
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
     if role not in ("operations_director", "accounting", "admin"):
@@ -194,13 +210,14 @@ async def get_archived_deals(
     month: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
+    x_telegram_init_data: Optional[str] = Header(default=None),
 ) -> List[Dict[str, Any]]:
     """
     Return archived deals from public.v_archived_deals.
 
     Accessible by: operations_director, accounting, admin.
     """
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
     if role not in ("operations_director", "accounting", "admin"):

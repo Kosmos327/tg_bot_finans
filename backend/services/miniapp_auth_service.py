@@ -19,6 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import AppUser, Manager, Role
 from app.core.config import settings
+from backend.services.telegram_auth import (
+    validate_telegram_init_data,
+    extract_user_from_init_data,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +200,79 @@ async def get_user_by_telegram_id(
 async def get_role_code(db: AsyncSession, role_id: int) -> Optional[str]:
     """Return the role code string for a given role_id, or None."""
     return await _get_role_code_by_id(db, role_id)
+
+
+async def resolve_user_from_init_data(
+    db: AsyncSession,
+    init_data: str,
+) -> tuple:
+    """
+    Resolve (user_id, role_code, full_name) from app_users using a raw
+    Telegram WebApp initData string.
+
+    Validates the HMAC signature before trusting the data.  Used as a
+    fallback on protected endpoints when X-Telegram-Id is absent but
+    X-Telegram-Init-Data is present (e.g. the auto-login has not yet
+    completed and telegram_id has not been stored client-side).
+
+    Returns (None, NO_ACCESS_ROLE, "") on any failure so callers can treat
+    this identically to a missing X-Telegram-Id header.
+    """
+    from backend.services.permissions import NO_ACCESS_ROLE
+
+    if not init_data:
+        return None, NO_ACCESS_ROLE, ""
+
+    token = settings.telegram_bot_token
+    if not token:
+        logger.warning("resolve_user_from_init_data: TELEGRAM_BOT_TOKEN not set, cannot validate initData")
+        return None, NO_ACCESS_ROLE, ""
+
+    is_valid = validate_telegram_init_data(init_data, token)
+    if not is_valid:
+        logger.warning("resolve_user_from_init_data: invalid initData HMAC signature")
+        return None, NO_ACCESS_ROLE, ""
+
+    user_dict = extract_user_from_init_data(init_data)
+    if not user_dict:
+        logger.warning("resolve_user_from_init_data: cannot extract user from initData")
+        return None, NO_ACCESS_ROLE, ""
+
+    raw_id = user_dict.get("id")
+    if raw_id is None:
+        logger.warning("resolve_user_from_init_data: no id field in initData user")
+        return None, NO_ACCESS_ROLE, ""
+
+    try:
+        telegram_id = int(raw_id)
+    except (ValueError, TypeError):
+        logger.warning("resolve_user_from_init_data: invalid id value %r in initData", raw_id)
+        return None, NO_ACCESS_ROLE, ""
+
+    user = await get_user_by_telegram_id(db, telegram_id)
+    if user is None:
+        logger.info(
+            "resolve_user_from_init_data: telegram_id=%s not found or inactive in app_users",
+            telegram_id,
+        )
+        return None, NO_ACCESS_ROLE, ""
+
+    role = await get_role_code(db, user.role_id)
+    if not role:
+        logger.warning(
+            "resolve_user_from_init_data: role_id=%s not found for app_user_id=%s",
+            user.role_id,
+            user.id,
+        )
+        return None, NO_ACCESS_ROLE, ""
+
+    logger.info(
+        "resolve_user_from_init_data: telegram_id=%s → app_user_id=%s role=%r (via initData fallback)",
+        telegram_id,
+        user.id,
+        role,
+    )
+    return user.id, role, user.full_name
 
 
 # ---------------------------------------------------------------------------
