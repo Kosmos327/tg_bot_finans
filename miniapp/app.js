@@ -283,8 +283,9 @@ async function loadSettings() {
   // It returns {id, name} objects used by SQL-function endpoints.
   try {
     const enriched = await apiFetch('/settings/enriched');
-    console.log("Loaded settings:", enriched);
+    console.log('[settings/enriched raw]', enriched);
     state.enrichedSettings = normalizeSettings(enriched);
+    console.log('[normalized warehouses]', state.enrichedSettings?.warehouses);
     state.settings = enriched;
     populateSelects(enriched);
     updateSettingsStats(enriched);
@@ -345,13 +346,18 @@ function populateSelects(data) {
   fillSelect('payment-direction-select', dirs);
   fillSelect('expense-direction-select', dirs);
 
-  // Billing warehouse dropdown – populate from enriched warehouses when available
-  if (data.warehouses && data.warehouses.length > 0) {
-    fillSelect('billing-warehouse', data.warehouses.map(w => ({
+  // Billing warehouse dropdown – always populate from enriched warehouses
+  // Use state.enrichedSettings.warehouses (canonical normalized source, set by normalizeSettings
+  // before populateSelects is called) so that the dropdown is filled whenever the API
+  // succeeded, regardless of whether the raw data reference is stale.
+  const warehousesForSelect = (state.enrichedSettings?.warehouses || data.warehouses || [])
+    .map(w => ({
       id: w.id,
       name: `${(w.code || '').toUpperCase()} — ${w.name}`,
-    })));
-  }
+    }));
+  console.log('[billing warehouse fill input]', warehousesForSelect);
+  fillSelect('billing-warehouse', warehousesForSelect);
+  console.log('[billing warehouse option count]', document.getElementById('billing-warehouse')?.options?.length);
 
   // Edit deal status dropdown
   fillSelect('edit-status', data.statuses || []);
