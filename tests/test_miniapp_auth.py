@@ -148,9 +148,11 @@ class TestMiniappLogin:
         from backend.services import miniapp_auth_service as svc
         role = _mock_role()
         db = _make_db_with_lookup(role_obj=role, user_obj=None, manager_obj=None)
-        with patch.object(svc.settings, "role_password_manager", "correct_password"):
+        with patch.object(svc.settings, "password_manager_ekaterina", "correct_password"), \
+             patch.object(svc.settings, "id_manager_ekaterina", "10"):
             with pytest.raises(PermissionError, match="Invalid password"):
-                await miniapp_login(db, 123, "Test", "user", "manager", "wrong_pass")
+                await miniapp_login(db, 123, "Test", "user", "manager", "wrong_pass",
+                                    selected_manager="ekaterina")
 
     @pytest.mark.asyncio
     async def test_successful_login_creates_new_user(self):
@@ -159,14 +161,19 @@ class TestMiniappLogin:
         role = _mock_role()
         db = _make_db_with_lookup(role_obj=role, user_obj=None, manager_obj=None)
 
-        with patch.object(svc.settings, "role_password_manager", "secret_manager"):
-            result = await miniapp_login(db, 123456, "Ivan Petrov", "ivan", "manager", "secret_manager")
+        with patch.object(svc.settings, "password_manager_ekaterina", "secret_manager"), \
+             patch.object(svc.settings, "id_manager_ekaterina", "10"):
+            result = await miniapp_login(db, 123456, "Ivan Petrov", "ivan", "manager", "secret_manager",
+                                         selected_manager="ekaterina")
 
         assert result["telegram_id"] == 123456
-        assert result["full_name"] == "Ivan Petrov"
+        # Manager login overrides full_name with the canonical Russian display name
+        # from config, not the Telegram-provided name ("Ivan Petrov").
+        assert result["full_name"] == "Екатерина"
         assert result["username"] == "ivan"
         assert result["role"] == "manager"
         assert "user_id" in result
+        assert result["manager_id"] == 10
         # Both app_user and manager should have been added
         assert db.add.call_count == 2
 
@@ -179,10 +186,13 @@ class TestMiniappLogin:
         existing_user.full_name = "Old Name"
         db = _make_db_with_lookup(role_obj=role, user_obj=existing_user, manager_obj=None)
 
-        with patch.object(svc.settings, "role_password_manager", "secret_manager"):
-            result = await miniapp_login(db, 123456, "New Name", "newuser", "manager", "secret_manager")
+        with patch.object(svc.settings, "password_manager_ekaterina", "secret_manager"), \
+             patch.object(svc.settings, "id_manager_ekaterina", "10"):
+            result = await miniapp_login(db, 123456, "New Name", "newuser", "manager", "secret_manager",
+                                         selected_manager="ekaterina")
 
-        assert result["full_name"] == "New Name"
+        # full_name is the canonical manager name, not the param passed to miniapp_login
+        assert result["full_name"] == "Екатерина"
         assert result["username"] == "newuser"
         # Only manager was added (user was updated in place)
         assert db.add.call_count == 1

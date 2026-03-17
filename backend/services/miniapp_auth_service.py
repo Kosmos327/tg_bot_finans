@@ -73,24 +73,31 @@ async def miniapp_login(
     username: Optional[str],
     selected_role: str,
     password: str,
+    selected_manager: Optional[str] = None,
 ) -> dict:
     """
     Full Mini App login flow:
 
     1. Validate selected_role exists in the roles table (by code).
-    2. Validate password against env-configured role password.
+    2. Validate password:
+       - For 'manager' role: require selected_manager ("ekaterina" or "yulia"),
+         validate password against PASSWORD_MANAGER_EKATERINA / PASSWORD_MANAGER_YULIA.
+       - For other roles: validate against ROLE_PASSWORD_<ROLE>.
     3. Create or update app_users record.
     4. If role is 'manager', ensure a matching managers record exists.
     5. Return a dict with user info for the Mini App response.
 
     Raises:
-        ValueError: if the selected_role does not exist in the roles table.
+        ValueError: if the selected_role does not exist in the roles table,
+                    or if selected_manager is missing/invalid for manager role.
         PermissionError: if the password is invalid for the selected role.
+        RuntimeError: if ID_MANAGER_* env is misconfigured (not a valid integer).
     """
     logger.info(
-        "miniapp_login attempt: telegram_id=%s selected_role=%r",
+        "miniapp_login attempt: telegram_id=%s selected_role=%r selected_manager=%r",
         telegram_id,
         selected_role,
+        selected_manager,
     )
 
     # Step 1 – validate role exists in DB
@@ -104,13 +111,65 @@ async def miniapp_login(
         raise ValueError(f"Role '{selected_role}' does not exist")
 
     # Step 2 – validate password
-    if not _verify_role_password(selected_role, password):
-        logger.warning(
-            "Login denied: invalid password for role %r. telegram_id=%s",
-            selected_role,
-            telegram_id,
-        )
-        raise PermissionError(f"Invalid password for role '{selected_role}'")
+    manager_id: Optional[int] = None
+    if selected_role == "manager":
+        # Manager role requires a concrete manager identity ("ekaterina" or "yulia").
+        # Password is validated against the per-manager env var, not a shared role password.
+        # full_name is also overridden with the canonical Russian display name from config.
+        manager_full_name: str = full_name  # default; will be replaced by the configured name
+        expected_password: str = ""
+        manager_id_str: str = ""
+        sm = (selected_manager or "").strip().lower()
+        if sm == "ekaterina":
+            expected_password = settings.password_manager_ekaterina
+            manager_full_name = "Екатерина"
+            manager_id_str = settings.id_manager_ekaterina
+        elif sm == "yulia":
+            expected_password = settings.password_manager_yulia
+            manager_full_name = "Юлия"
+            manager_id_str = settings.id_manager_yulia
+        else:
+            logger.warning(
+                "Login denied: selected_manager=%r is not valid for manager role. telegram_id=%s",
+                selected_manager,
+                telegram_id,
+            )
+            raise ValueError(
+                "selected_manager is required for manager role. "
+                "Allowed values: 'ekaterina', 'yulia'."
+            )
+
+        if not expected_password or password != expected_password:
+            logger.warning(
+                "Login denied: invalid password for manager %r. telegram_id=%s",
+                sm,
+                telegram_id,
+            )
+            raise PermissionError(f"Invalid password for manager '{sm}'")
+
+        try:
+            manager_id = int(manager_id_str) if manager_id_str else None
+        except (ValueError, TypeError):
+            logger.error(
+                "Misconfigured manager ID for %r: %r. Set ID_MANAGER_%s to a valid integer.",
+                sm,
+                manager_id_str,
+                sm.upper(),
+            )
+            raise RuntimeError(
+                f"Manager ID is misconfigured for '{sm}'. Contact your administrator."
+            )
+
+        # Override full_name with the canonical configured Russian display name
+        full_name = manager_full_name
+    else:
+        if not _verify_role_password(selected_role, password):
+            logger.warning(
+                "Login denied: invalid password for role %r. telegram_id=%s",
+                selected_role,
+                telegram_id,
+            )
+            raise PermissionError(f"Invalid password for role '{selected_role}'")
 
     # Step 3 – upsert app_users via SQL function (authoritative write path)
     app_user = await _upsert_app_user_sql(
@@ -131,19 +190,23 @@ async def miniapp_login(
         )
 
     logger.info(
-        "miniapp_login success: telegram_id=%s app_user_id=%s role=%r",
+        "miniapp_login success: telegram_id=%s app_user_id=%s role=%r manager_id=%s",
         telegram_id,
         app_user.id,
         selected_role,
+        manager_id,
     )
 
-    return {
+    result: dict = {
         "user_id": app_user.id,
         "telegram_id": app_user.telegram_id,
         "full_name": app_user.full_name,
         "username": app_user.username,
         "role": selected_role,
     }
+    if manager_id is not None:
+        result["manager_id"] = manager_id
+    return result
 
 
 # ---------------------------------------------------------------------------
