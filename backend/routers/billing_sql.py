@@ -20,7 +20,7 @@ from app.database.database import get_db
 from backend.schemas.billing import BillingUpsertRequest, BillingPayRequest, BillingPaymentMarkRequest
 from backend.services.db_exec import call_sql_function_one, read_sql_view
 from backend.services.miniapp_auth_service import get_user_by_telegram_id, get_role_code, resolve_user_from_init_data
-from backend.services.permissions import NO_ACCESS_ROLE
+from backend.services.permissions import NO_ACCESS_ROLE, ALLOWED_ROLES
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +35,15 @@ async def _resolve_user(
     db: AsyncSession,
     x_telegram_id: Optional[str],
     x_telegram_init_data: Optional[str] = None,
+    x_user_role: Optional[str] = None,
 ) -> tuple:
     """
     Resolve (user_id, role_code, full_name) from app_users.
 
-    Primary path: X-Telegram-Id header.
-    Fallback path: X-Telegram-Init-Data header (HMAC-validated).
+    Fallback chain (first match wins):
+      1. X-Telegram-Id header.
+      2. X-Telegram-Init-Data header (HMAC-validated).
+      3. X-User-Role header — browser/web-mode users who completed role-login.
     Returns (None, NO_ACCESS_ROLE, "") on failure.
     """
     if x_telegram_id:
@@ -57,6 +60,11 @@ async def _resolve_user(
     if x_telegram_init_data:
         return await resolve_user_from_init_data(db, x_telegram_init_data)
 
+    if x_user_role and x_user_role.strip():
+        role = x_user_role.strip().lower()
+        if role in ALLOWED_ROLES:
+            return "", role, ""
+
     return None, NO_ACCESS_ROLE, ""
 
 
@@ -72,9 +80,10 @@ async def list_billing(
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
     x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
 ) -> List[Dict[str, Any]]:
     """Return billing entries from public.v_api_billing."""
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data, x_user_role)
 
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
@@ -112,13 +121,14 @@ async def upsert_billing_entry(
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
     x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     """
     Create or update a billing entry via public.api_upsert_billing_entry(...).
 
     Accessible by: manager, accounting, operations_director, admin.
     """
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data, x_user_role)
 
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
@@ -158,13 +168,14 @@ async def pay_billing_entry(
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
     x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     """
     Record a payment for a billing entry via public.api_pay_billing_entry(...).
 
     Accessible by: accounting, operations_director, admin.
     """
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data, x_user_role)
 
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
@@ -202,6 +213,7 @@ async def search_billing(
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
     x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     """
     Search for a billing entry by client_id, warehouse_id, month, and/or period.
@@ -214,7 +226,7 @@ async def search_billing(
 
     Accessible by: manager, accounting, operations_director, admin.
     """
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data, x_user_role)
 
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
@@ -265,6 +277,7 @@ async def mark_deal_payment(
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
     x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     """
     Mark a payment on a deal via public.api_pay_deal(deal_id, payment_amount, payment_date).
@@ -275,7 +288,7 @@ async def mark_deal_payment(
     Replaces the legacy POST /billing/payment/mark (Sheets-based) endpoint.
     Accessible by: accounting, operations_director, admin.
     """
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data, x_user_role)
 
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")

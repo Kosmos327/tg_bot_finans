@@ -21,7 +21,7 @@ from backend.models.deal import DealUpdate
 from backend.schemas.deals import DealCreateRequest, DealPayRequest
 from backend.services.db_exec import call_sql_function, call_sql_function_one, read_sql_view
 from backend.services.miniapp_auth_service import get_user_by_telegram_id, get_role_code, resolve_user_from_init_data
-from backend.services.permissions import NO_ACCESS_ROLE, can_see_all_deals
+from backend.services.permissions import NO_ACCESS_ROLE, ALLOWED_ROLES, can_see_all_deals
 from backend.services.telegram_auth import extract_user_from_init_data
 
 logger = logging.getLogger(__name__)
@@ -37,14 +37,18 @@ async def _resolve_user(
     db: AsyncSession,
     x_telegram_id: Optional[str],
     x_telegram_init_data: Optional[str] = None,
+    x_user_role: Optional[str] = None,
 ) -> tuple:
     """
     Resolve (user_id_int, role_code, full_name) from app_users.
 
-    Primary path: X-Telegram-Id header (stored after /auth/miniapp-login).
-    Fallback path: X-Telegram-Init-Data header (validates HMAC, extracts
-    telegram_id, and looks up app_users) — used when auto-login has not yet
-    completed and telegram_id is not stored client-side.
+    Fallback chain (first match wins):
+      1. X-Telegram-Id header (stored after /auth/miniapp-login).
+      2. X-Telegram-Init-Data header (validates HMAC, extracts telegram_id,
+         looks up app_users) — used when auto-login has not yet completed.
+      3. X-User-Role header — browser/web-mode users who completed role-login
+         but have no Telegram context.  Role is accepted as-is after confirming
+         it is a known allowed role.
 
     Returns (None, NO_ACCESS_ROLE, "") on failure.
     """
@@ -63,6 +67,11 @@ async def _resolve_user(
 
     if x_telegram_init_data:
         return await resolve_user_from_init_data(db, x_telegram_init_data)
+
+    if x_user_role and x_user_role.strip():
+        role = x_user_role.strip().lower()
+        if role in ALLOWED_ROLES:
+            return "", role, ""
 
     return None, NO_ACCESS_ROLE, ""
 
@@ -109,6 +118,7 @@ async def list_deals(
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
     x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
 ) -> List[Dict[str, Any]]:
     """
     Return deals from public.v_api_deals.
@@ -117,7 +127,7 @@ async def list_deals(
     Higher roles can see all deals and optionally filter by manager_id / client_id /
     status_id / business_direction_id.
     """
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data, x_user_role)
 
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
@@ -165,6 +175,7 @@ async def create_deal(
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
     x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     """
     Create a new deal via public.api_create_deal(...).
@@ -172,7 +183,7 @@ async def create_deal(
     Returns the created deal record.
     Accessible by: manager, operations_director, admin.
     """
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data, x_user_role)
 
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
@@ -210,13 +221,14 @@ async def pay_deal(
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
     x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     """
     Record a payment for a deal via public.api_pay_deal(...).
 
     Accessible by: accounting, operations_director, admin.
     """
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data, x_user_role)
 
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
@@ -248,6 +260,7 @@ async def get_deal(
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
     x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     """
     Return a single deal from public.v_api_deals.
@@ -257,7 +270,7 @@ async def get_deal(
 
     Replaces the legacy GET /deal/{id} endpoint.
     """
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data, x_user_role)
 
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
@@ -303,6 +316,7 @@ async def update_deal(
     db: AsyncSession = Depends(get_db),
     x_telegram_id: Optional[str] = Header(default=None),
     x_telegram_init_data: Optional[str] = Header(default=None),
+    x_user_role: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     """
     Update deal fields via PostgreSQL.
@@ -314,7 +328,7 @@ async def update_deal(
     """
     from backend.services import deals_service
 
-    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data)
+    user_id, role, full_name = await _resolve_user(db, x_telegram_id, x_telegram_init_data, x_user_role)
 
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")

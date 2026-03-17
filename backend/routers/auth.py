@@ -182,6 +182,7 @@ class RoleLoginResponse(BaseModel):
     success: bool
     role: str
     role_label: str
+    telegram_id: Optional[int] = None
 
 
 @router.post("/role-login", response_model=RoleLoginResponse)
