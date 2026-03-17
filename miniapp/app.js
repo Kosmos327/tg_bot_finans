@@ -95,6 +95,23 @@ function hasTelegramAuthContext() {
   return tgSdkAvailable && (hasInitData || hasUser);
 }
 
+/**
+ * Returns true when the user has completed role/password login and the
+ * resulting auth data is present in localStorage.  Works in both Telegram
+ * and plain browser (web) modes — telegram_id is optional for web users.
+ */
+function hasLocalAuth() {
+  return !!localStorage.getItem('user_role');
+}
+
+/**
+ * Returns true when there is any valid auth context — either a live Telegram
+ * session or previously stored role credentials (web mode).
+ */
+function hasUsableAuthContext() {
+  return hasTelegramAuthContext() || hasLocalAuth();
+}
+
 // ==========================================
 // API HELPERS
 // ==========================================
@@ -1220,10 +1237,13 @@ async function checkConnections() {
   let tgStatus, tgOk;
   if (isInTelegram) {
     tgOk = true;
-    tgStatus = 'Подключено';
+    tgStatus = 'Telegram Auth — Подключено';
+  } else if (hasLocalAuth()) {
+    tgOk = true;
+    tgStatus = 'Web Auth — Активно';
   } else {
     tgOk = false;
-    tgStatus = 'Открыто вне Telegram';
+    tgStatus = 'Авторизация не выполнена';
   }
   setConnectionStatus('telegram', tgOk, tgStatus);
 
@@ -1708,6 +1728,7 @@ async function loginWithTelegram() {
 // APP INIT
 // ==========================================
 async function init() {
+  // Step 1: initialise Telegram SDK (safe no-op outside Telegram)
   initTelegram();
   initTabs();
   initDealForm();
@@ -1715,18 +1736,16 @@ async function init() {
   initModal();
   initMonthClose();
 
-  // Auto-authenticate with backend using Telegram initData when context is
-  // available. Runs once per session; skipped if telegram_id is already stored.
+  // Step 2: attempt Telegram auto-login when a valid Telegram context exists.
+  // Skipped silently in plain browser mode (hasTelegramAuthContext() == false).
   if (hasTelegramAuthContext()) {
     await loginWithTelegram();
   }
 
-  // Check auth before showing any content
+  // Step 3a: If running inside Telegram but telegram_id was never stored,
+  // the app_users record may be missing (old login flow). Force re-auth so
+  // that /auth/miniapp-login is called and the record is created.
   const savedRole = localStorage.getItem('user_role');
-
-  // If running inside Telegram and user has a saved role but no telegram_id stored,
-  // the app_users record may not exist yet (old login flow). Force re-authentication
-  // so that /auth/miniapp-login is called and the record is created.
   if (savedRole && hasTelegramAuthContext() && !localStorage.getItem('telegram_id')) {
     localStorage.removeItem('user_role');
     localStorage.removeItem('user_role_label');
@@ -1734,11 +1753,18 @@ async function init() {
     return;
   }
 
-  if (savedRole) {
-    await enterApp(savedRole);
-  } else {
+  // Step 3b: No usable auth at all — show the login screen and stop boot.
+  // Both Telegram mode (after a failed auto-login) and browser mode (first
+  // visit or after logout) reach this branch when no credentials are stored.
+  if (!hasUsableAuthContext()) {
     showAuthScreen();
+    return;
   }
+
+  // Step 4: Auth is available — continue normal initialisation.
+  // savedRole is guaranteed non-empty here because hasUsableAuthContext()
+  // returned true, which means hasLocalAuth() == true == !!user_role.
+  await enterApp(savedRole);
 }
 
 document.addEventListener('DOMContentLoaded', init);
@@ -1901,22 +1927,41 @@ function initAuthHandlers() {
           console.log('[auth] telegram_id saved to localStorage:', storedTelegramId);
         }
       } else {
-        // Fallback path: no Telegram context (e.g. dev/testing environment)
+        // Web / browser mode: no Telegram context — use role+password login.
         const result = await apiFetch('/auth/role-login', {
           method: 'POST',
           body: JSON.stringify({ role: selectedRole, password }),
         });
         if (!result.success) throw new Error(result.error || result.message || 'Login failed');
+        if (!result.role) throw new Error('Server returned no role');
         role = result.role;
-        roleLabel = result.role_label;
+        roleLabel = result.role_label || ROLE_LABELS[result.role] || result.role;
+        // Store telegram_id if the backend ever returns one (future-proofing).
+        // In pure browser mode this field is absent and we simply skip it.
+        if (result.telegram_id) {
+          localStorage.setItem('telegram_id', String(result.telegram_id));
+          console.log('[auth] telegram_id saved to localStorage from role-login:', result.telegram_id);
+        }
       }
 
       localStorage.setItem('user_role', role);
       localStorage.setItem('user_role_label', roleLabel);
       await enterApp(role);
     } catch (err) {
+      console.warn('[auth] doLogin failed:', err.message);
       if (errEl) {
-        errEl.textContent = 'Неверный пароль. Попробуйте ещё раз.';
+        // Show a meaningful error: wrong password, server unavailable, etc.
+        // Do not expose Telegram-specific error messages in browser mode.
+        const msg = err.message || '';
+        if (msg.includes('401') || msg.includes('Invalid password') || msg.includes('Неверный')) {
+          errEl.textContent = 'Неверный пароль. Попробуйте ещё раз.';
+        } else if (msg.includes('400') || msg.includes('Unknown role')) {
+          errEl.textContent = 'Неизвестная роль. Обратитесь к администратору.';
+        } else if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('502') || msg.includes('503')) {
+          errEl.textContent = 'Сервер недоступен. Проверьте подключение.';
+        } else {
+          errEl.textContent = 'Ошибка входа. Проверьте пароль и попробуйте ещё раз.';
+        }
         errEl.style.display = 'block';
       }
     } finally {
