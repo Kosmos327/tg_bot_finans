@@ -1204,10 +1204,18 @@ function initModal() {
 // SETTINGS TAB
 // ==========================================
 async function checkConnections() {
+  // Debug: log raw Telegram SDK state at the time this check runs
+  // (initTelegram() must have already been called before checkConnections())
+  console.log('[conn-check] window.Telegram exists:', !!window.Telegram);
+  console.log('[conn-check] window.Telegram.WebApp exists:', !!window.Telegram?.WebApp);
+  console.log('[conn-check] tg (module var) exists:', !!tg);
+  console.log('[conn-check] tg.initData length:', tg?.initData ? tg.initData.length : 0);
+  console.log('[conn-check] tg.initDataUnsafe.user exists:', !!tg?.initDataUnsafe?.user);
+
   // Use the shared helper so UI logic matches real auth logic.
   const isInTelegram = hasTelegramAuthContext();
 
-  console.log('[tg-check] isInTelegram:', isInTelegram);
+  console.log('[conn-check] hasTelegramAuthContext() result:', isInTelegram);
 
   let tgStatus, tgOk;
   if (isInTelegram) {
@@ -1227,7 +1235,7 @@ async function checkConnections() {
     setConnectionStatus('api', false, 'Недоступен');
   }
 
-  // Google Sheets (check settings endpoint)
+  // Справочники (check /settings endpoint)
   try {
     await apiFetch('/settings');
     setConnectionStatus('sheets', true, 'Подключено');
