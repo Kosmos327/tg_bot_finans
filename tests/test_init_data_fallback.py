@@ -458,3 +458,112 @@ class TestJournalResolveUser:
         from backend.services.permissions import NO_ACCESS_ROLE
         _, role = _resolve_user(init_data=None, role_header=None)
         assert role == NO_ACCESS_ROLE
+
+
+# ---------------------------------------------------------------------------
+# Tests: X-User-Role fallback in SQL routers (browser/web mode)
+# ---------------------------------------------------------------------------
+
+class TestDealsResolveUserRoleFallback:
+    """Tests for deals_sql._resolve_user with X-User-Role header fallback."""
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_user_role_header(self):
+        from backend.routers.deals_sql import _resolve_user
+        db = _make_db(user=None)
+        user_id, role, full_name = await _resolve_user(
+            db, x_telegram_id=None, x_telegram_init_data=None, x_user_role="manager"
+        )
+        assert role == "manager"
+        assert user_id == ""
+
+    @pytest.mark.asyncio
+    async def test_role_fallback_rejects_unknown_role(self):
+        from backend.routers.deals_sql import _resolve_user
+        from backend.services.permissions import NO_ACCESS_ROLE
+        db = _make_db(user=None)
+        user_id, role, full_name = await _resolve_user(
+            db, x_telegram_id=None, x_telegram_init_data=None, x_user_role="superuser"
+        )
+        assert role == NO_ACCESS_ROLE
+
+    @pytest.mark.asyncio
+    async def test_telegram_id_takes_priority_over_user_role(self):
+        from backend.routers.deals_sql import _resolve_user
+        user = _mock_app_user(telegram_id=123456, role_id=1)
+        role_obj = _mock_role(role_id=1, code="manager")
+        db = _make_db(user=user, role=role_obj)
+        user_id, role, full_name = await _resolve_user(
+            db, x_telegram_id="123456", x_telegram_init_data=None, x_user_role="admin"
+        )
+        # Should resolve via telegram_id (manager), not via x_user_role (admin)
+        assert role == "manager"
+        assert user_id == 10
+
+
+class TestBillingResolveUserRoleFallback:
+    """Tests for billing_sql._resolve_user with X-User-Role header fallback."""
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_user_role_header(self):
+        from backend.routers.billing_sql import _resolve_user
+        db = _make_db(user=None)
+        user_id, role, full_name = await _resolve_user(
+            db, x_telegram_id=None, x_telegram_init_data=None, x_user_role="accounting"
+        )
+        assert role == "accounting"
+
+    @pytest.mark.asyncio
+    async def test_role_fallback_rejects_unknown_role(self):
+        from backend.routers.billing_sql import _resolve_user
+        from backend.services.permissions import NO_ACCESS_ROLE
+        db = _make_db(user=None)
+        user_id, role, full_name = await _resolve_user(
+            db, x_telegram_id=None, x_telegram_init_data=None, x_user_role="unknown_role"
+        )
+        assert role == NO_ACCESS_ROLE
+
+
+class TestExpensesResolveUserRoleFallback:
+    """Tests for expenses_sql._resolve_user with X-User-Role header fallback."""
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_user_role_header(self):
+        from backend.routers.expenses_sql import _resolve_user
+        db = _make_db(user=None)
+        user_id, role, full_name = await _resolve_user(
+            db, x_telegram_id=None, x_telegram_init_data=None, x_user_role="operations_director"
+        )
+        assert role == "operations_director"
+
+    @pytest.mark.asyncio
+    async def test_role_fallback_normalises_case(self):
+        from backend.routers.expenses_sql import _resolve_user
+        db = _make_db(user=None)
+        user_id, role, full_name = await _resolve_user(
+            db, x_telegram_id=None, x_telegram_init_data=None, x_user_role="ADMIN"
+        )
+        assert role == "admin"
+
+
+class TestMonthCloseResolveUserRoleFallback:
+    """Tests for month_close._resolve_user with X-User-Role header fallback."""
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_user_role_header(self):
+        from backend.routers.month_close import _resolve_user
+        db = _make_db(user=None)
+        user_id, role, full_name = await _resolve_user(
+            db, x_telegram_id=None, x_telegram_init_data=None, x_user_role="admin"
+        )
+        assert role == "admin"
+
+    @pytest.mark.asyncio
+    async def test_returns_no_access_when_all_absent(self):
+        from backend.routers.month_close import _resolve_user
+        from backend.services.permissions import NO_ACCESS_ROLE
+        db = _make_db(user=None)
+        user_id, role, full_name = await _resolve_user(
+            db, x_telegram_id=None, x_telegram_init_data=None, x_user_role=None
+        )
+        assert role == NO_ACCESS_ROLE
