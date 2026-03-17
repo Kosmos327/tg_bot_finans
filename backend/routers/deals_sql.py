@@ -285,9 +285,12 @@ async def pay_deal(
         raise HTTPException(status_code=403, detail="Access denied: insufficient role")
 
     params = body.model_dump()
+    # p_updated_by_user_id is the FIRST parameter of public.api_pay_deal.
+    updated_by_user_id = user_id if isinstance(user_id, int) else None
+    params["updated_by_user_id"] = updated_by_user_id
     sql = (
         "SELECT * FROM public.api_pay_deal("
-        ":deal_id, :payment_amount, :payment_date"
+        ":updated_by_user_id, :deal_id, :payment_amount, :payment_date"
         ")"
     )
 

@@ -137,10 +137,14 @@ async def upsert_billing_entry(
         raise HTTPException(status_code=403, detail="Access denied: insufficient role")
 
     params = body.model_dump()
+    # p_updated_by_user_id is the FIRST parameter of public.api_upsert_billing_entry.
+    # Use the authenticated app_users integer ID when available; None for browser mode.
+    updated_by_user_id = user_id if isinstance(user_id, int) else None
+    params["updated_by_user_id"] = updated_by_user_id
 
     sql = (
         "SELECT * FROM public.api_upsert_billing_entry("
-        ":client_id, :warehouse_id, :month, :period, "
+        ":updated_by_user_id, :client_id, :warehouse_id, :month, :period, "
         ":shipments_with_vat, :shipments_without_vat, :units_count, "
         ":storage_with_vat, :storage_without_vat, :pallets_count, "
         ":returns_pickup_with_vat, :returns_pickup_without_vat, :returns_trips_count, "
@@ -184,10 +188,13 @@ async def pay_billing_entry(
         raise HTTPException(status_code=403, detail="Access denied: insufficient role")
 
     params = body.model_dump()
+    # p_updated_by_user_id is the FIRST parameter of public.api_pay_billing_entry.
+    updated_by_user_id = user_id if isinstance(user_id, int) else None
+    params["updated_by_user_id"] = updated_by_user_id
 
     sql = (
         "SELECT * FROM public.api_pay_billing_entry("
-        ":billing_entry_id, :payment_amount, :payment_date"
+        ":updated_by_user_id, :billing_entry_id, :payment_amount, :payment_date"
         ")"
     )
 
@@ -317,8 +324,11 @@ async def mark_deal_payment(
         if not int_deal_id:
             raise HTTPException(status_code=500, detail="Cannot resolve deal ID to integer")
 
-    sql = "SELECT * FROM public.api_pay_deal(:deal_id, :payment_amount, :payment_date)"
+    # p_updated_by_user_id is the FIRST parameter of public.api_pay_deal.
+    updated_by_user_id = user_id if isinstance(user_id, int) else None
+    sql = "SELECT * FROM public.api_pay_deal(:updated_by_user_id, :deal_id, :payment_amount, :payment_date)"
     params = {
+        "updated_by_user_id": updated_by_user_id,
         "deal_id": int_deal_id,
         "payment_amount": body.payment_amount,
         "payment_date": body.payment_date,

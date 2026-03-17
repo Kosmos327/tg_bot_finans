@@ -423,3 +423,420 @@ class TestDealCreateParameterOrder:
             "BUG: :manager_id appears after :charged_with_vat in the captured SQL — "
             "parameter order mismatch will cause FK violation at runtime"
         )
+
+
+# ---------------------------------------------------------------------------
+# Regression: billing/payment SQL signature fixes
+# All three pay/upsert SQL functions require p_updated_by_user_id as FIRST arg.
+# ---------------------------------------------------------------------------
+
+class TestBillingUpdateByUserIdParameterOrder:
+    """
+    Regression tests ensuring updated_by_user_id is the FIRST parameter in
+    all billing/payment SQL function calls.
+
+    The PostgreSQL functions:
+      - public.api_upsert_billing_entry(p_updated_by_user_id, p_client_id, ...)
+      - public.api_pay_billing_entry(p_updated_by_user_id, p_billing_entry_id, ...)
+      - public.api_pay_deal(p_updated_by_user_id, p_deal_id, ...)
+    all require p_updated_by_user_id as position 1.
+    """
+
+    def test_billing_upsert_sql_has_updated_by_user_id_before_client_id(self):
+        """billing_sql.py upsert: :updated_by_user_id must precede :client_id."""
+        import inspect
+        from backend.routers.billing_sql import upsert_billing_entry
+
+        source = inspect.getsource(upsert_billing_entry)
+
+        uid_pos = source.find(":updated_by_user_id")
+        client_pos = source.find(":client_id")
+
+        assert uid_pos != -1, ":updated_by_user_id not found in upsert_billing_entry SQL"
+        assert client_pos != -1, ":client_id not found in upsert_billing_entry SQL"
+        assert uid_pos < client_pos, (
+            "BUG: :updated_by_user_id must be BEFORE :client_id in "
+            "api_upsert_billing_entry — PostgreSQL function requires it as p_1."
+        )
+
+    def test_billing_pay_sql_has_updated_by_user_id_before_billing_entry_id(self):
+        """billing_sql.py pay: :updated_by_user_id must precede :billing_entry_id."""
+        import inspect
+        from backend.routers.billing_sql import pay_billing_entry
+
+        source = inspect.getsource(pay_billing_entry)
+
+        uid_pos = source.find(":updated_by_user_id")
+        entry_pos = source.find(":billing_entry_id")
+
+        assert uid_pos != -1, ":updated_by_user_id not found in pay_billing_entry SQL"
+        assert entry_pos != -1, ":billing_entry_id not found in pay_billing_entry SQL"
+        assert uid_pos < entry_pos, (
+            "BUG: :updated_by_user_id must be BEFORE :billing_entry_id in "
+            "api_pay_billing_entry — PostgreSQL function requires it as p_1."
+        )
+
+    def test_billing_payment_mark_sql_has_updated_by_user_id_before_deal_id(self):
+        """billing_sql.py payment/mark: :updated_by_user_id must precede :deal_id."""
+        import inspect
+        from backend.routers.billing_sql import mark_deal_payment
+
+        source = inspect.getsource(mark_deal_payment)
+
+        uid_pos = source.find(":updated_by_user_id")
+        deal_pos = source.find(":deal_id")
+
+        assert uid_pos != -1, ":updated_by_user_id not found in mark_deal_payment SQL"
+        assert deal_pos != -1, ":deal_id not found in mark_deal_payment SQL"
+        assert uid_pos < deal_pos, (
+            "BUG: :updated_by_user_id must be BEFORE :deal_id in "
+            "api_pay_deal (billing payment/mark) — PostgreSQL function requires it as p_1."
+        )
+
+    def test_deals_pay_sql_has_updated_by_user_id_before_deal_id(self):
+        """deals_sql.py pay: :updated_by_user_id must precede :deal_id."""
+        import inspect
+        from backend.routers.deals_sql import pay_deal
+
+        source = inspect.getsource(pay_deal)
+
+        uid_pos = source.find(":updated_by_user_id")
+        deal_pos = source.find(":deal_id")
+
+        assert uid_pos != -1, ":updated_by_user_id not found in pay_deal SQL"
+        assert deal_pos != -1, ":deal_id not found in pay_deal SQL"
+        assert uid_pos < deal_pos, (
+            "BUG: :updated_by_user_id must be BEFORE :deal_id in "
+            "api_pay_deal (deals pay) — PostgreSQL function requires it as p_1."
+        )
+
+    @pytest.mark.asyncio
+    async def test_billing_upsert_endpoint_passes_updated_by_user_id_first(self):
+        """
+        End-to-end: POST /billing/v2/upsert must pass updated_by_user_id as the
+        first named param and it must appear first in the SQL string.
+        """
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured: dict = {}
+
+        async def capture_params(db, sql, params):
+            captured["sql"] = sql
+            captured["params"] = dict(params)
+            return {"id": 1, "client_id": 5, "warehouse_id": 3, "month": "2024-01"}
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.billing_sql.call_sql_function_one",
+                new_callable=AsyncMock,
+                side_effect=capture_params,
+            ):
+                with patch(
+                    "backend.routers.billing_sql._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=(42, "accounting", "Test User"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.post(
+                        "/billing/v2/upsert",
+                        json={
+                            "client_id": 5,
+                            "warehouse_id": 3,
+                            "month": "2024-01",
+                            "shipments_with_vat": 10000,
+                        },
+                        headers={"X-User-Role": "accounting"},
+                    )
+                    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured, "call_sql_function_one was never called"
+        params = captured["params"]
+        assert "updated_by_user_id" in params, "updated_by_user_id missing from params"
+        assert params["updated_by_user_id"] == 42, (
+            f"updated_by_user_id should be 42 (user_id from auth), got {params['updated_by_user_id']!r}"
+        )
+        sql = captured["sql"]
+        assert ":updated_by_user_id" in sql
+        assert sql.index(":updated_by_user_id") < sql.index(":client_id"), (
+            "BUG: :updated_by_user_id must appear before :client_id in SQL"
+        )
+
+    @pytest.mark.asyncio
+    async def test_billing_pay_endpoint_passes_updated_by_user_id_first(self):
+        """
+        End-to-end: POST /billing/v2/pay must pass updated_by_user_id as the
+        first named param.
+        """
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured: dict = {}
+
+        async def capture_params(db, sql, params):
+            captured["sql"] = sql
+            captured["params"] = dict(params)
+            return {"id": 1, "billing_entry_id": 10, "payment_amount": 5000}
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.billing_sql.call_sql_function_one",
+                new_callable=AsyncMock,
+                side_effect=capture_params,
+            ):
+                with patch(
+                    "backend.routers.billing_sql._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=(7, "accounting", "Accountant"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.post(
+                        "/billing/v2/pay",
+                        json={"billing_entry_id": 10, "payment_amount": 5000},
+                        headers={"X-User-Role": "accounting"},
+                    )
+                    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured, "call_sql_function_one was never called"
+        params = captured["params"]
+        assert "updated_by_user_id" in params
+        assert params["updated_by_user_id"] == 7
+        sql = captured["sql"]
+        assert sql.index(":updated_by_user_id") < sql.index(":billing_entry_id"), (
+            "BUG: :updated_by_user_id must appear before :billing_entry_id in SQL"
+        )
+
+    @pytest.mark.asyncio
+    async def test_payment_mark_endpoint_passes_updated_by_user_id_first(self):
+        """
+        End-to-end: POST /billing/v2/payment/mark must pass updated_by_user_id
+        as the first named param to api_pay_deal.
+        """
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured: dict = {}
+
+        async def capture_params(db, sql, params):
+            captured["sql"] = sql
+            captured["params"] = dict(params)
+            return {"id": 99, "remaining_amount": 0}
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.billing_sql.call_sql_function_one",
+                new_callable=AsyncMock,
+                side_effect=capture_params,
+            ):
+                with patch(
+                    "backend.routers.billing_sql._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=(15, "accounting", "Accountant"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.post(
+                        "/billing/v2/payment/mark",
+                        json={"deal_id": "99", "payment_amount": 3000},
+                        headers={"X-User-Role": "accounting"},
+                    )
+                    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured, "call_sql_function_one was never called"
+        params = captured["params"]
+        assert "updated_by_user_id" in params
+        assert params["updated_by_user_id"] == 15
+        sql = captured["sql"]
+        assert sql.index(":updated_by_user_id") < sql.index(":deal_id"), (
+            "BUG: :updated_by_user_id must appear before :deal_id in SQL"
+        )
+
+    @pytest.mark.asyncio
+    async def test_deals_pay_endpoint_passes_updated_by_user_id_first(self):
+        """
+        End-to-end: POST /deals/pay must pass updated_by_user_id as the first
+        named param to api_pay_deal.
+        """
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured: dict = {}
+
+        async def capture_params(db, sql, params):
+            captured["sql"] = sql
+            captured["params"] = dict(params)
+            return {"id": 55, "remaining_amount": 1000}
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.deals_sql.call_sql_function_one",
+                new_callable=AsyncMock,
+                side_effect=capture_params,
+            ):
+                with patch(
+                    "backend.routers.deals_sql._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=(33, "accounting", "Accountant"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.post(
+                        "/deals/pay",
+                        json={"deal_id": 55, "payment_amount": 2000},
+                        headers={"X-User-Role": "accounting"},
+                    )
+                    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured, "call_sql_function_one was never called"
+        params = captured["params"]
+        assert "updated_by_user_id" in params
+        assert params["updated_by_user_id"] == 33
+        sql = captured["sql"]
+        assert sql.index(":updated_by_user_id") < sql.index(":deal_id"), (
+            "BUG: :updated_by_user_id must appear before :deal_id in SQL"
+        )
+
+    @pytest.mark.asyncio
+    async def test_billing_upsert_browser_mode_passes_none_for_updated_by_user_id(self):
+        """
+        In browser mode (X-User-Role only, no Telegram ID), user_id is "" (str),
+        so updated_by_user_id must be None — not a string, not a fake int.
+        """
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured: dict = {}
+
+        async def capture_params(db, sql, params):
+            captured["params"] = dict(params)
+            return {"id": 1, "month": "2024-01"}
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.billing_sql.call_sql_function_one",
+                new_callable=AsyncMock,
+                side_effect=capture_params,
+            ):
+                with patch(
+                    "backend.routers.billing_sql._resolve_user",
+                    new_callable=AsyncMock,
+                    # Browser mode: user_id is "" (empty string, not integer)
+                    return_value=("", "accounting", ""),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.post(
+                        "/billing/v2/upsert",
+                        json={"client_id": 5, "warehouse_id": 3, "month": "2024-01"},
+                        headers={"X-User-Role": "accounting"},
+                    )
+                    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured
+        assert captured["params"]["updated_by_user_id"] is None, (
+            "In browser mode (user_id=''), updated_by_user_id must be None, "
+            f"got {captured['params']['updated_by_user_id']!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_billing_upsert_returns_500_when_sql_returns_no_result(self):
+        """If SQL function returns no result, endpoint should return HTTP 500."""
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        async def return_none(db, sql, params):
+            return None
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.billing_sql.call_sql_function_one",
+                new_callable=AsyncMock,
+                side_effect=return_none,
+            ):
+                with patch(
+                    "backend.routers.billing_sql._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=(1, "accounting", "Accountant"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=False)
+                    resp = client.post(
+                        "/billing/v2/upsert",
+                        json={"client_id": 5, "warehouse_id": 3, "month": "2024-01"},
+                        headers={"X-User-Role": "accounting"},
+                    )
+                    assert resp.status_code == 500
+                    assert "no result" in resp.json()["detail"].lower()
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+    @pytest.mark.asyncio
+    async def test_payment_mark_returns_404_when_sql_returns_no_result(self):
+        """If api_pay_deal returns no result, endpoint should return HTTP 404."""
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        async def return_none(db, sql, params):
+            return None
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.billing_sql.call_sql_function_one",
+                new_callable=AsyncMock,
+                side_effect=return_none,
+            ):
+                with patch(
+                    "backend.routers.billing_sql._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=(1, "accounting", "Accountant"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=False)
+                    resp = client.post(
+                        "/billing/v2/payment/mark",
+                        json={"deal_id": "999", "payment_amount": 1000},
+                        headers={"X-User-Role": "accounting"},
+                    )
+                    assert resp.status_code == 404
+        finally:
+            app.dependency_overrides.pop(get_db, None)
