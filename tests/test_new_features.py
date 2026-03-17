@@ -29,6 +29,12 @@ os.environ.setdefault("ROLE_PASSWORD_OPERATIONS_DIRECTOR", "2")
 os.environ.setdefault("ROLE_PASSWORD_ACCOUNTING", "3")
 os.environ.setdefault("ROLE_PASSWORD_ADMIN", "12345")
 
+# Manager-specific credentials for web auth (role-login endpoint)
+os.environ.setdefault("PASSWORD_MANAGER_EKATERINA", "ek_pass")
+os.environ.setdefault("ID_MANAGER_EKATERINA", "10")
+os.environ.setdefault("PASSWORD_MANAGER_YULIA", "yu_pass")
+os.environ.setdefault("ID_MANAGER_YULIA", "20")
+
 
 # ---------------------------------------------------------------------------
 # permissions
@@ -518,8 +524,39 @@ def client():
 
 
 class TestRoleLogin:
+    def test_valid_manager_ekaterina_login(self, client):
+        resp = client.post("/auth/role-login", json={
+            "role": "manager", "password": "ek_pass", "selected_manager": "ekaterina",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["role"] == "manager"
+        assert data["manager_id"] == 10
+        assert data["full_name"] == "Екатерина"
+        assert data["user_id"] == 10
+
+    def test_valid_manager_yulia_login(self, client):
+        resp = client.post("/auth/role-login", json={
+            "role": "manager", "password": "yu_pass", "selected_manager": "yulia",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["role"] == "manager"
+        assert data["manager_id"] == 20
+        assert data["full_name"] == "Юлия"
+        assert data["user_id"] == 20
+
+    def test_manager_without_selected_manager_returns_400(self, client):
+        resp = client.post("/auth/role-login", json={"role": "manager", "password": "ek_pass"})
+        assert resp.status_code == 400
+
     def test_valid_manager_login(self, client):
-        resp = client.post("/auth/role-login", json={"role": "manager", "password": "1"})
+        # Alias kept for backward compat: logs in as Ekaterina
+        resp = client.post("/auth/role-login", json={
+            "role": "manager", "password": "ek_pass", "selected_manager": "ekaterina",
+        })
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
@@ -539,7 +576,9 @@ class TestRoleLogin:
         assert resp.status_code == 200
 
     def test_wrong_password(self, client):
-        resp = client.post("/auth/role-login", json={"role": "manager", "password": "999"})
+        resp = client.post("/auth/role-login", json={
+            "role": "manager", "password": "999", "selected_manager": "ekaterina",
+        })
         assert resp.status_code == 401
 
     def test_unknown_role(self, client):

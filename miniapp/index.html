@@ -25,6 +25,16 @@
           <button class="role-btn" data-role="admin"><span class="role-icon">🔐</span><span>Администратор</span></button>
         </div>
       </div>
+      <div id="auth-step-manager" style="display:none;">
+        <p class="auth-subtitle">Выберите менеджера:</p>
+        <div class="role-list">
+          <button class="manager-btn" data-manager="ekaterina"><span class="role-icon">👤</span><span>Екатерина</span></button>
+          <button class="manager-btn" data-manager="yulia"><span class="role-icon">👤</span><span>Юлия</span></button>
+        </div>
+        <div class="auth-actions">
+          <button class="btn btn-secondary" id="auth-manager-back-btn">Назад</button>
+        </div>
+      </div>
       <div id="auth-step-password" style="display:none;">
         <p class="auth-subtitle">Роль: <strong id="auth-role-label"></strong></p>
         <div class="auth-input-wrap">

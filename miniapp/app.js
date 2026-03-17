@@ -321,6 +321,16 @@ function populateSelects(data) {
   fillSelect('vat_type', data.vat_types || []);
   fillSelect('source', data.sources || []);
 
+  // Auto-select the manager from localStorage when role is manager (web mode).
+  const storedManagerId = localStorage.getItem('manager_id');
+  if (storedManagerId) {
+    const managerSelect = document.getElementById('manager');
+    if (managerSelect && !managerSelect.value) {
+      managerSelect.value = storedManagerId;
+      console.log('[populateSelects] auto-selected manager_id from localStorage:', storedManagerId);
+    }
+  }
+
   // ALL client dropdowns — use the same normalized source
   const clients = data.clients || [];
   console.log('[populateSelects] populating client dropdowns with', clients.length, 'clients');
@@ -1749,6 +1759,9 @@ async function init() {
   if (savedRole && hasTelegramAuthContext() && !localStorage.getItem('telegram_id')) {
     localStorage.removeItem('user_role');
     localStorage.removeItem('user_role_label');
+    localStorage.removeItem('user_id');
+    localStorage.removeItem('user_name');
+    localStorage.removeItem('manager_id');
     showAuthScreen();
     return;
   }
@@ -1848,15 +1861,46 @@ function showAuthScreen() {
 
 function initAuthHandlers() {
   let selectedRole = null;
+  let selectedManager = null;  // "ekaterina" or "yulia" (manager role only)
 
   // Role buttons
   document.querySelectorAll('.role-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       selectedRole = btn.dataset.role;
-      const label = ROLE_LABELS[selectedRole] || selectedRole;
-      setEl('auth-role-label', label);
 
       document.getElementById('auth-step-role').style.display = 'none';
+
+      if (selectedRole === 'manager') {
+        // Show manager selector before password step
+        selectedManager = null;
+        document.getElementById('auth-step-manager').style.display = 'block';
+      } else {
+        selectedManager = null;
+        const label = ROLE_LABELS[selectedRole] || selectedRole;
+        setEl('auth-role-label', label);
+        document.getElementById('auth-step-password').style.display = 'block';
+
+        const pwInput = document.getElementById('auth-password');
+        if (pwInput) {
+          pwInput.value = '';
+          pwInput.focus();
+        }
+
+        const errEl = document.getElementById('auth-error');
+        if (errEl) errEl.style.display = 'none';
+      }
+    });
+  });
+
+  // Manager selector buttons
+  document.querySelectorAll('.manager-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedManager = btn.dataset.manager;
+      const managerLabel = btn.querySelector('span:last-child')?.textContent || selectedManager;
+      const roleLabel = (ROLE_LABELS[selectedRole] || selectedRole) + ' — ' + managerLabel;
+      setEl('auth-role-label', roleLabel);
+
+      document.getElementById('auth-step-manager').style.display = 'none';
       document.getElementById('auth-step-password').style.display = 'block';
 
       const pwInput = document.getElementById('auth-password');
@@ -1870,12 +1914,26 @@ function initAuthHandlers() {
     });
   });
 
-  // Back button
+  // Back button from manager step → role step
+  const managerBackBtn = document.getElementById('auth-manager-back-btn');
+  if (managerBackBtn) managerBackBtn.addEventListener('click', () => {
+    document.getElementById('auth-step-manager').style.display = 'none';
+    document.getElementById('auth-step-role').style.display = 'block';
+    selectedRole = null;
+    selectedManager = null;
+  });
+
+  // Back button from password step
   const backBtn = document.getElementById('auth-back-btn');
   if (backBtn) backBtn.addEventListener('click', () => {
-    document.getElementById('auth-step-role').style.display = 'block';
     document.getElementById('auth-step-password').style.display = 'none';
-    selectedRole = null;
+    if (selectedRole === 'manager') {
+      document.getElementById('auth-step-manager').style.display = 'block';
+      selectedManager = null;
+    } else {
+      document.getElementById('auth-step-role').style.display = 'block';
+      selectedRole = null;
+    }
   });
 
   // Submit button
@@ -1885,6 +1943,14 @@ function initAuthHandlers() {
   const doLogin = async () => {
     const password = pwInput ? pwInput.value : '';
     if (!selectedRole || !password) return;
+    if (selectedRole === 'manager' && !selectedManager) {
+      const errEl = document.getElementById('auth-error');
+      if (errEl) {
+        errEl.textContent = 'Выберите менеджера перед вводом пароля.';
+        errEl.style.display = 'block';
+      }
+      return;
+    }
 
     submitBtn.disabled = true;
     const errEl = document.getElementById('auth-error');
@@ -1930,7 +1996,7 @@ function initAuthHandlers() {
         // Web / browser mode: no Telegram context — use role+password login.
         const result = await apiFetch('/auth/role-login', {
           method: 'POST',
-          body: JSON.stringify({ role: selectedRole, password }),
+          body: JSON.stringify({ role: selectedRole, password, selected_manager: selectedManager }),
         });
         if (!result.success) throw new Error(result.error || result.message || 'Login failed');
         if (!result.role) throw new Error('Server returned no role');
@@ -1941,6 +2007,17 @@ function initAuthHandlers() {
         if (result.telegram_id) {
           localStorage.setItem('telegram_id', String(result.telegram_id));
           console.log('[auth] telegram_id saved to localStorage from role-login:', result.telegram_id);
+        }
+        // Store web auth context fields
+        if (result.user_id != null) {
+          localStorage.setItem('user_id', String(result.user_id));
+        }
+        if (result.full_name) {
+          localStorage.setItem('user_name', result.full_name);
+        }
+        if (result.manager_id != null) {
+          localStorage.setItem('manager_id', String(result.manager_id));
+          console.log('[auth] manager_id saved to localStorage:', result.manager_id);
         }
       }
 
@@ -1955,8 +2032,8 @@ function initAuthHandlers() {
         const msg = err.message || '';
         if (msg.includes('401') || msg.includes('Invalid password') || msg.includes('Неверный')) {
           errEl.textContent = 'Неверный пароль. Попробуйте ещё раз.';
-        } else if (msg.includes('400') || msg.includes('Unknown role')) {
-          errEl.textContent = 'Неизвестная роль. Обратитесь к администратору.';
+        } else if (msg.includes('400') || msg.includes('Unknown role') || msg.includes('Unknown manager')) {
+          errEl.textContent = 'Неизвестная роль или менеджер. Обратитесь к администратору.';
         } else if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('502') || msg.includes('503')) {
           errEl.textContent = 'Сервер недоступен. Проверьте подключение.';
         } else {
@@ -2002,6 +2079,9 @@ async function enterApp(role) {
     localStorage.removeItem('user_role');
     localStorage.removeItem('user_role_label');
     localStorage.removeItem('telegram_id');
+    localStorage.removeItem('user_id');
+    localStorage.removeItem('user_name');
+    localStorage.removeItem('manager_id');
     location.reload();
   });
 

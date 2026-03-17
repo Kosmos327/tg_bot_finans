@@ -176,36 +176,89 @@ async def miniapp_login_endpoint(
 class RoleLoginRequest(BaseModel):
     role: str
     password: str
+    selected_manager: Optional[str] = None  # "ekaterina" or "yulia" (manager role only)
 
 
 class RoleLoginResponse(BaseModel):
     success: bool
     role: str
     role_label: str
+    user_id: Optional[int] = None
+    full_name: Optional[str] = None
+    manager_id: Optional[int] = None
     telegram_id: Optional[int] = None
 
 
 @router.post("/role-login", response_model=RoleLoginResponse)
 async def role_login(body: RoleLoginRequest) -> RoleLoginResponse:
     """
-    Validate a role+password pair for the Mini App login screen.
+    Validate a role+password pair for web (browser) mode login.
+    No Telegram ID is required.
 
-    The Mini App stores the returned role in localStorage so it persists
-    across sessions.  No session token is issued on the backend side; the
-    role is re-validated on every sensitive request via the role field in
-    the request body or the X-User-Role header.
+    For the ``manager`` role, ``selected_manager`` must be provided
+    (``"ekaterina"`` or ``"yulia"``); the password is validated against
+    the corresponding ``PASSWORD_MANAGER_*`` environment variable and the
+    ``manager_id`` is returned from the corresponding ``ID_MANAGER_*`` variable.
+
+    For all other roles the password is validated against the shared
+    ``ROLE_PASSWORD_*`` environment variable.
+
+    Returns user info (including ``manager_id`` for managers) on success.
     """
     role = body.role.strip().lower()
     if role not in ALLOWED_ROLES:
         raise HTTPException(status_code=400, detail=f"Unknown role: {role}")
 
-    if not verify_role_password(role, body.password):
-        raise HTTPException(status_code=401, detail="Invalid password")
+    user_id: Optional[int] = None
+    full_name: Optional[str] = None
+    manager_id: Optional[int] = None
+
+    if role == "manager":
+        selected_manager = (body.selected_manager or "").strip().lower()
+        if selected_manager == "ekaterina":
+            expected_password = settings.password_manager_ekaterina
+            manager_full_name = "Екатерина"
+            manager_id_str = settings.id_manager_ekaterina
+        elif selected_manager == "yulia":
+            expected_password = settings.password_manager_yulia
+            manager_full_name = "Юлия"
+            manager_id_str = settings.id_manager_yulia
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Unknown manager. Select Екатерина or Юлия.",
+            )
+
+        if not expected_password or body.password != expected_password:
+            raise HTTPException(status_code=401, detail="Invalid password")
+
+        full_name = manager_full_name
+        try:
+            manager_id = int(manager_id_str) if manager_id_str else None
+        except (ValueError, TypeError):
+            logger.error(
+                "Invalid manager ID configured for %r: %r. "
+                "Set ID_MANAGER_%s to a valid integer.",
+                selected_manager,
+                manager_id_str,
+                selected_manager.upper(),
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Manager ID is misconfigured. Contact your administrator.",
+            )
+        user_id = manager_id
+    else:
+        if not verify_role_password(role, body.password):
+            raise HTTPException(status_code=401, detail="Invalid password")
 
     return RoleLoginResponse(
         success=True,
         role=role,
         role_label=ROLE_LABELS_RU.get(role, role),
+        user_id=user_id,
+        full_name=full_name,
+        manager_id=manager_id,
     )
 
 
