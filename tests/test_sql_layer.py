@@ -292,43 +292,46 @@ class TestDealCreateParameterOrder:
     Regression tests for the parameter-order bug in POST /deals/create.
 
     Symptoms: frontend sends manager_id=1 and charged_with_vat=123, but
-    PostgreSQL raises: Key (manager_id)=(123) is not present in table "managers"
+    PostgreSQL raises: "List argument must consist only of tuples or dictionaries"
+    (when params was a plain list) or FK violation (when params were swapped).
 
-    Root cause: asyncpg converts named SQLAlchemy bind params (:name) to
-    positional $N placeholders in the ORDER they first appear in the SQL string,
-    or — if it iterates the params dict in insertion order — it maps dict values
-    to $N by dict position rather than by name.  This causes values to land in
-    the wrong SQL function argument slot.
+    Root cause: params was built as a Python list and passed to
+    call_sql_function_one, which forwarded it to exec_driver_sql.  asyncpg
+    treats a list as an executemany batch (each element must be a tuple/dict),
+    causing the 500 crash.
 
-    Fix: use positional $N placeholders directly and pass params as an ordered
-    list, so asyncpg receives values in the exact order the SQL function expects.
+    Fix: params must be a plain dict with :name placeholders in the SQL so
+    that call_sql_function_one uses text() with named bind parameters and
+    asyncpg maps each value by name — order in the dict does not matter.
     """
 
     def test_sql_has_manager_id_before_charged_with_vat(self):
         """
-        The params list in create_deal must place manager_id ($5) before
-        charged_with_vat ($6) to match the SQL function signature.  Verified
-        by checking the list construction in the source code.
+        params dict in create_deal must use named :param placeholders and
+        must place :manager_id before :charged_with_vat in the SQL string to
+        match the SQL function signature.  Verified by inspecting source code.
         """
         import inspect
         from backend.routers.deals_sql import create_deal
 
         source = inspect.getsource(create_deal)
 
-        # With positional params the SQL should NOT contain :name style params
-        assert ":manager_id" not in source or "$5" in source, (
-            "create_deal should use positional $N params, not :name params"
+        # Params must use named :name style, not positional $N
+        assert ":manager_id" in source, (
+            "create_deal must use named :manager_id bind param, not positional $N"
+        )
+        assert "$5" not in source, (
+            "create_deal must NOT use positional $5 — use named :manager_id instead"
         )
 
-        # The params list must have manager_id (index 4 = $5) before
-        # charged_with_vat (index 5 = $6).  Check list construction order.
-        manager_pos = source.find("manager_id,")
-        charged_pos = source.find("charged_with_vat,")
+        # :manager_id must appear before :charged_with_vat in the SQL string
+        manager_pos = source.find(":manager_id")
+        charged_pos = source.find(":charged_with_vat")
 
-        assert manager_pos != -1, "manager_id not found in create_deal params list"
-        assert charged_pos != -1, "charged_with_vat not found in create_deal params list"
+        assert manager_pos != -1, ":manager_id not found in create_deal source"
+        assert charged_pos != -1, ":charged_with_vat not found in create_deal source"
         assert manager_pos < charged_pos, (
-            "BUG: manager_id appears AFTER charged_with_vat in the params list — "
+            "BUG: :manager_id appears AFTER :charged_with_vat in the SQL — "
             "they will be passed in the wrong order to the SQL function."
         )
 
@@ -362,12 +365,14 @@ class TestDealCreateParameterOrder:
     @pytest.mark.asyncio
     async def test_create_deal_endpoint_binds_manager_id_and_charged_with_vat_correctly(self):
         """
-        End-to-end regression: POST /deals/create must pass manager_id=1 at
-        positional slot $5 (index 4) and charged_with_vat=123 at positional slot
-        $6 (index 5) without swapping them.
+        End-to-end regression: POST /deals/create must pass manager_id=1 and
+        charged_with_vat=123 as a plain dict (not a list) so that
+        call_sql_function_one uses text() with named bind parameters instead
+        of exec_driver_sql (which would raise "List argument must consist only
+        of tuples or dictionaries").
 
-        This is the primary guard against the original FK bug where
-        charged_with_vat=123 was sent as p_manager_id to the SQL function.
+        This is the primary guard against the 500 crash caused by passing a
+        plain Python list to call_sql_function_one.
         """
         from fastapi.testclient import TestClient
         from app.database.database import get_db
@@ -377,7 +382,7 @@ class TestDealCreateParameterOrder:
 
         async def capture_params(db, sql, params):
             captured["sql"] = sql
-            captured["params"] = list(params)  # list of positional values
+            captured["params"] = params  # must be a plain dict
             return {"id": 42, "deal_id": "DEAL-000042", "status": "Новая"}
 
         # Provide a no-op async DB session so get_db doesn't attempt a real connection
@@ -417,23 +422,27 @@ class TestDealCreateParameterOrder:
         assert captured, "call_sql_function_one was never called — route did not reach the SQL layer"
 
         params = captured["params"]
-        assert isinstance(params, list), f"params must be a list, got {type(params).__name__}"
-        assert len(params) == 19, f"Expected 19 positional params, got {len(params)}"
+        assert isinstance(params, dict), (
+            f"params must be a plain dict (not list/tuple), got {type(params).__name__} — "
+            "passing a list causes: 'List argument must consist only of tuples or dictionaries'"
+        )
+        assert len(params) == 19, f"Expected 19 named params, got {len(params)}"
 
-        # $5 (index 4) → p_manager_id
-        assert params[4] == 1, (
-            f"BUG: params[4] (p_manager_id) should be 1 but got {params[4]!r} "
-            f"(params[5]={params[5]!r}) — manager_id and charged_with_vat may be swapped"
+        # Verify manager_id and charged_with_vat are correctly bound by name
+        assert params["manager_id"] == 1, (
+            f"BUG: params['manager_id'] should be 1 but got {params['manager_id']!r} "
+            f"— manager_id and charged_with_vat may be swapped"
         )
-        # $6 (index 5) → p_charged_with_vat
-        assert params[5] == Decimal("123"), (
-            f"BUG: params[5] (p_charged_with_vat) should be Decimal('123') but got "
-            f"{params[5]!r}"
+        assert params["charged_with_vat"] == Decimal("123"), (
+            f"BUG: params['charged_with_vat'] should be Decimal('123') but got "
+            f"{params['charged_with_vat']!r}"
         )
-        # Confirm SQL uses positional placeholders
+        # Confirm SQL uses named placeholders, not positional
         sql = captured["sql"]
-        assert "$5" in sql, "$5 positional placeholder missing from SQL"
-        assert "$6" in sql, "$6 positional placeholder missing from SQL"
+        assert ":manager_id" in sql, ":manager_id named placeholder missing from SQL"
+        assert ":charged_with_vat" in sql, ":charged_with_vat named placeholder missing from SQL"
+        assert "$5" not in sql, "$5 positional placeholder must NOT be in SQL (use :manager_id)"
+        assert "$6" not in sql, "$6 positional placeholder must NOT be in SQL (use :charged_with_vat)"
 
 
 # ---------------------------------------------------------------------------
