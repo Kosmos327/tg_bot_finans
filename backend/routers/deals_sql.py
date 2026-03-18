@@ -192,6 +192,10 @@ async def create_deal(
         raise HTTPException(status_code=403, detail="Access denied: insufficient role")
 
     params = body.model_dump()
+    # Explicitly re-assign client_id from the validated request body to
+    # guarantee it is always present and non-None in the params dict, regardless
+    # of any Pydantic serialisation configuration (e.g. exclude_none / exclude_unset).
+    params["client_id"] = body.client_id
     # Resolve created_by_user_id from auth context: integer app_users.id when
     # authenticated via Telegram, None for web/browser mode (no Telegram session).
     created_by_user_id = user_id if isinstance(user_id, int) else None
