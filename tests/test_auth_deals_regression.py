@@ -322,17 +322,46 @@ class TestMiniappManagerAuth:
 
 class TestDealCreateSQLSignature:
     """
-    Regression tests that prove created_by_user_id is first in the SQL call
-    and that created_by_user_id and manager_id are NOT swapped.
+    Regression tests that prove create_deal uses strictly-ordered positional
+    parameters ($1…$19) and passes them as a list, guaranteeing that asyncpg
+    never misroutes a value to the wrong SQL function argument.
+
+    Parameter positions (0-based list index → SQL $N → PostgreSQL argument):
+      [0]  $1  p_created_by_user_id
+      [1]  $2  p_status_id
+      [2]  $3  p_business_direction_id
+      [3]  $4  p_client_id
+      [4]  $5  p_manager_id
+      [5]  $6  p_charged_with_vat
+      [6]  $7  p_vat_type_id
+      [7]  $8  p_vat_rate
+      [8]  $9  p_paid
+      [9]  $10 p_project_start_date
+      [10] $11 p_project_end_date
+      [11] $12 p_act_date
+      [12] $13 p_variable_expense_1_without_vat
+      [13] $14 p_variable_expense_2_without_vat
+      [14] $15 p_production_expense_without_vat
+      [15] $16 p_manager_bonus_percent
+      [16] $17 p_source_id
+      [17] $18 p_document_link
+      [18] $19 p_comment
     """
+
+    # Indices for human-readable constants used across test methods
+    _IDX_CREATED_BY = 0
+    _IDX_STATUS = 1
+    _IDX_DIRECTION = 2
+    _IDX_CLIENT = 3
+    _IDX_MANAGER = 4
+    _TOTAL_PARAMS = 19
 
     def _extract_sql_and_params(self) -> tuple:
         """
         Run the create_deal endpoint with a mocked DB and capture the SQL
-        text and params that were passed to call_sql_function_one.
-        Returns (sql_text, params_dict).
+        text and params list that were passed to call_sql_function_one.
+        Returns (sql_text, params_list).
         """
-        import asyncio
         from fastapi.testclient import TestClient
         from backend.main import app
 
@@ -362,49 +391,71 @@ class TestDealCreateSQLSignature:
                 )
 
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
-        return captured.get("sql", ""), captured.get("params", {})
+        return captured.get("sql", ""), captured.get("params", [])
 
-    def test_created_by_user_id_is_first_param_in_sql(self):
+    def test_sql_uses_positional_placeholders(self):
+        """SQL must use $1…$19 positional placeholders, not :name style."""
+        import re
         sql, params = self._extract_sql_and_params()
-        # created_by_user_id must appear before status_id in the SQL text
-        assert ":created_by_user_id" in sql
-        assert sql.index(":created_by_user_id") < sql.index(":status_id")
-
-    def test_manager_id_is_after_client_id_in_sql(self):
-        sql, params = self._extract_sql_and_params()
-        # manager_id must come after client_id (per SQL signature)
-        assert ":manager_id" in sql
-        assert ":client_id" in sql
-        assert sql.index(":client_id") < sql.index(":manager_id")
-
-    def test_created_by_user_id_and_manager_id_not_swapped(self):
-        sql, params = self._extract_sql_and_params()
-        # created_by_user_id is first, manager_id is later — they must not be adjacent
-        # in the wrong order (manager_id before created_by_user_id)
-        cbuid_pos = sql.index(":created_by_user_id")
-        mgrid_pos = sql.index(":manager_id")
-        assert cbuid_pos < mgrid_pos, (
-            "created_by_user_id must appear before manager_id in SQL text"
+        assert "$1" in sql, "SQL must contain $1 positional placeholder"
+        assert "$19" in sql, "SQL must contain $19 positional placeholder"
+        assert not re.search(r':[a-zA-Z_]\w*', sql), (
+            "SQL must not contain :name style placeholders"
         )
 
-    def test_charged_without_vat_not_in_sql(self):
-        """charged_without_vat does not exist in the SQL function — must not be sent."""
+    def test_params_is_a_list(self):
+        """Params must be a list (not a dict) to guarantee positional order."""
         sql, params = self._extract_sql_and_params()
-        assert ":charged_without_vat" not in sql
+        assert isinstance(params, list), f"params must be a list, got {type(params).__name__}"
 
-    def test_params_include_created_by_user_id(self):
+    def test_params_has_exact_count(self):
+        """Params list must contain exactly 19 values matching the SQL function signature."""
         sql, params = self._extract_sql_and_params()
-        assert "created_by_user_id" in params
+        assert len(params) == self._TOTAL_PARAMS, (
+            f"Expected {self._TOTAL_PARAMS} params, got {len(params)}"
+        )
 
-    def test_created_by_user_id_is_authenticated_user_id(self):
-        """created_by_user_id must be the auth context user_id (42), not manager_id (7)."""
+    def test_created_by_user_id_is_first_param(self):
+        """created_by_user_id must be at position $1 (index 0) in the params list."""
         sql, params = self._extract_sql_and_params()
-        assert params.get("created_by_user_id") == 42
-        assert params.get("manager_id") == 7
+        assert isinstance(params, list) and len(params) > self._IDX_CREATED_BY
+        assert params[self._IDX_CREATED_BY] == 42, (
+            f"params[0] (p_created_by_user_id) should be 42, got {params[0]!r}"
+        )
+
+    def test_client_id_is_at_position_4(self):
+        """client_id must be at position $4 (index 3) — not shifted by missing/extra params."""
+        sql, params = self._extract_sql_and_params()
+        assert isinstance(params, list) and len(params) > self._IDX_CLIENT
+        assert params[self._IDX_CLIENT] == 3, (
+            f"params[3] (p_client_id) should be 3, got {params[self._IDX_CLIENT]!r}"
+        )
+
+    def test_manager_id_is_at_position_5(self):
+        """manager_id must be at position $5 (index 4), after client_id at $4."""
+        sql, params = self._extract_sql_and_params()
+        assert isinstance(params, list) and len(params) > self._IDX_MANAGER
+        assert params[self._IDX_MANAGER] == 7, (
+            f"params[4] (p_manager_id) should be 7, got {params[self._IDX_MANAGER]!r}"
+        )
+
+    def test_created_by_user_id_and_manager_id_not_swapped(self):
+        """created_by_user_id ($1) and manager_id ($5) must not be swapped."""
+        sql, params = self._extract_sql_and_params()
+        assert isinstance(params, list) and len(params) > self._IDX_MANAGER
+        assert params[self._IDX_CREATED_BY] == 42, "created_by_user_id must be 42 at index 0"
+        assert params[self._IDX_MANAGER] == 7, "manager_id must be 7 at index 4"
+
+    def test_charged_without_vat_not_in_params(self):
+        """p_charged_without_vat does not exist in the SQL function — must not be in params."""
+        sql, params = self._extract_sql_and_params()
+        # With 19 positional params there is simply no slot for charged_without_vat
+        assert len(params) == self._TOTAL_PARAMS, (
+            "Params list has wrong length — charged_without_vat may have been injected"
+        )
 
     def test_created_by_user_id_none_for_web_mode(self):
-        """When user_id is not an integer (web mode), created_by_user_id is None."""
-        import asyncio
+        """When user_id is not an integer (web mode), params[0] (created_by_user_id) is None."""
         from fastapi.testclient import TestClient
         from backend.main import app
 
@@ -434,19 +485,26 @@ class TestDealCreateSQLSignature:
                 )
 
         assert resp.status_code == 200
-        assert captured.get("params", {}).get("created_by_user_id") is None
+        params = captured.get("params", [])
+        assert isinstance(params, list), "params must be a list"
+        assert params[self._IDX_CREATED_BY] is None, (
+            f"params[0] (created_by_user_id) should be None in web mode, got {params[0]!r}"
+        )
 
     def test_client_id_is_present_and_not_none_in_params(self):
         """
-        Regression: client_id must be explicitly present and non-None in the
-        params dict passed to api_create_deal, matching the value submitted by
-        the frontend. This guards against the bug where client_id was saved as
-        NULL in the database.
+        Regression: client_id must be at the correct positional slot ($4, index 3)
+        and must be non-None.  This guards against the original bug where
+        client_id was saved as NULL because it landed in the wrong $N slot.
         """
         submitted_client_id = 3  # value sent in _extract_sql_and_params payload
         sql, params = self._extract_sql_and_params()
-        assert "client_id" in params, "client_id is missing from params dict"
-        assert params["client_id"] is not None, "client_id is None in params — deal would be saved with NULL client"
-        assert params["client_id"] == submitted_client_id, (
-            f"client_id should be {submitted_client_id} (as submitted), got {params['client_id']!r}"
+        assert isinstance(params, list), "params must be a list"
+        assert len(params) > self._IDX_CLIENT, "params list is too short to contain client_id"
+        assert params[self._IDX_CLIENT] is not None, (
+            "params[3] (p_client_id) is None — deal would be saved with NULL client"
+        )
+        assert params[self._IDX_CLIENT] == submitted_client_id, (
+            f"params[3] (p_client_id) should be {submitted_client_id}, "
+            f"got {params[self._IDX_CLIENT]!r}"
         )
