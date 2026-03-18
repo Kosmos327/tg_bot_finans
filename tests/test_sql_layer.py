@@ -295,31 +295,41 @@ class TestDealCreateParameterOrder:
     PostgreSQL raises: Key (manager_id)=(123) is not present in table "managers"
 
     Root cause: asyncpg converts named SQLAlchemy bind params (:name) to
-    positional $N placeholders in the ORDER they first appear in the SQL string.
-    If :charged_with_vat appeared before :manager_id, the value 123 would be
-    passed as $4 → p_manager_id, triggering the FK violation.
+    positional $N placeholders in the ORDER they first appear in the SQL string,
+    or — if it iterates the params dict in insertion order — it maps dict values
+    to $N by dict position rather than by name.  This causes values to land in
+    the wrong SQL function argument slot.
+
+    Fix: use positional $N placeholders directly and pass params as an ordered
+    list, so asyncpg receives values in the exact order the SQL function expects.
     """
 
     def test_sql_has_manager_id_before_charged_with_vat(self):
         """
-        The SQL template in create_deal must have :manager_id before
-        :charged_with_vat so asyncpg's positional $4/:manager_id maps
-        correctly to p_manager_id in the SQL function.
+        The params list in create_deal must place manager_id ($5) before
+        charged_with_vat ($6) to match the SQL function signature.  Verified
+        by checking the list construction in the source code.
         """
         import inspect
         from backend.routers.deals_sql import create_deal
 
         source = inspect.getsource(create_deal)
 
-        manager_pos = source.find(":manager_id")
-        charged_pos = source.find(":charged_with_vat")
+        # With positional params the SQL should NOT contain :name style params
+        assert ":manager_id" not in source or "$5" in source, (
+            "create_deal should use positional $N params, not :name params"
+        )
 
-        assert manager_pos != -1, ":manager_id not found in create_deal source"
-        assert charged_pos != -1, ":charged_with_vat not found in create_deal source"
+        # The params list must have manager_id (index 4 = $5) before
+        # charged_with_vat (index 5 = $6).  Check list construction order.
+        manager_pos = source.find("manager_id,")
+        charged_pos = source.find("charged_with_vat,")
+
+        assert manager_pos != -1, "manager_id not found in create_deal params list"
+        assert charged_pos != -1, "charged_with_vat not found in create_deal params list"
         assert manager_pos < charged_pos, (
-            "BUG: :manager_id appears AFTER :charged_with_vat in the SQL — "
-            "asyncpg will swap their $N positions and charged_with_vat will "
-            "be passed as p_manager_id, causing FK violations."
+            "BUG: manager_id appears AFTER charged_with_vat in the params list — "
+            "they will be passed in the wrong order to the SQL function."
         )
 
     def test_model_dump_does_not_swap_manager_id_and_charged_with_vat(self):
@@ -352,8 +362,9 @@ class TestDealCreateParameterOrder:
     @pytest.mark.asyncio
     async def test_create_deal_endpoint_binds_manager_id_and_charged_with_vat_correctly(self):
         """
-        End-to-end regression: POST /deals/create must pass manager_id=1 and
-        charged_with_vat=123 to call_sql_function_one without swapping them.
+        End-to-end regression: POST /deals/create must pass manager_id=1 at
+        positional slot $5 (index 4) and charged_with_vat=123 at positional slot
+        $6 (index 5) without swapping them.
 
         This is the primary guard against the original FK bug where
         charged_with_vat=123 was sent as p_manager_id to the SQL function.
@@ -366,7 +377,7 @@ class TestDealCreateParameterOrder:
 
         async def capture_params(db, sql, params):
             captured["sql"] = sql
-            captured["params"] = dict(params)
+            captured["params"] = list(params)  # list of positional values
             return {"id": 42, "deal_id": "DEAL-000042", "status": "Новая"}
 
         # Provide a no-op async DB session so get_db doesn't attempt a real connection
@@ -406,23 +417,23 @@ class TestDealCreateParameterOrder:
         assert captured, "call_sql_function_one was never called — route did not reach the SQL layer"
 
         params = captured["params"]
-        assert params["manager_id"] == 1, (
-            f"BUG: manager_id should be 1 but got {params.get('manager_id')!r} "
-            f"(charged_with_vat={params.get('charged_with_vat')!r}) — "
-            "manager_id and charged_with_vat are swapped in the SQL call"
+        assert isinstance(params, list), f"params must be a list, got {type(params).__name__}"
+        assert len(params) == 19, f"Expected 19 positional params, got {len(params)}"
+
+        # $5 (index 4) → p_manager_id
+        assert params[4] == 1, (
+            f"BUG: params[4] (p_manager_id) should be 1 but got {params[4]!r} "
+            f"(params[5]={params[5]!r}) — manager_id and charged_with_vat may be swapped"
         )
-        assert params["charged_with_vat"] == Decimal("123"), (
-            f"BUG: charged_with_vat should be Decimal('123') but got "
-            f"{params.get('charged_with_vat')!r}"
+        # $6 (index 5) → p_charged_with_vat
+        assert params[5] == Decimal("123"), (
+            f"BUG: params[5] (p_charged_with_vat) should be Decimal('123') but got "
+            f"{params[5]!r}"
         )
-        # Confirm SQL contains named params in the right order
+        # Confirm SQL uses positional placeholders
         sql = captured["sql"]
-        assert ":manager_id" in sql, ":manager_id bind param missing from SQL"
-        assert ":charged_with_vat" in sql, ":charged_with_vat bind param missing from SQL"
-        assert sql.index(":manager_id") < sql.index(":charged_with_vat"), (
-            "BUG: :manager_id appears after :charged_with_vat in the captured SQL — "
-            "parameter order mismatch will cause FK violation at runtime"
-        )
+        assert "$5" in sql, "$5 positional placeholder missing from SQL"
+        assert "$6" in sql, "$6 positional placeholder missing from SQL"
 
 
 # ---------------------------------------------------------------------------

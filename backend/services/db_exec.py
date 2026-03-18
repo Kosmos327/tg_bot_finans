@@ -16,7 +16,7 @@ Design rules:
 import logging
 from decimal import Decimal
 from datetime import date, datetime
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
@@ -70,13 +70,24 @@ def _extract_sql_error_message(exc: Exception) -> str:
 async def call_sql_function(
     db: AsyncSession,
     func_call: str,
-    params: Optional[dict] = None,
+    params: Optional[Union[dict, list]] = None,
 ) -> list[dict]:
     """
     Execute a SQL function call and return all result rows as dicts.
 
-    ``func_call`` must be a SELECT expression such as:
+    ``func_call`` must be a SELECT expression.  Two calling conventions are
+    supported:
+
+    Named parameters (dict) — use ``:name`` placeholders in the SQL:
         "SELECT * FROM public.api_create_deal(:p_status_id, :p_manager_id, ...)"
+
+    Positional parameters (list) — use ``$1, $2, …`` placeholders in the SQL:
+        "SELECT * FROM public.api_create_deal($1, $2, ...)"
+        params = [status_id, manager_id, ...]
+
+    When a list is supplied, parameters are passed directly to the asyncpg
+    driver via ``exec_driver_sql`` so that the positional order is guaranteed
+    and asyncpg never re-orders them.
 
     All user-supplied values must be passed via ``params`` (bind parameters).
     Never interpolate user data directly into ``func_call``.
@@ -86,10 +97,15 @@ async def call_sql_function(
                     (e.g. invalid input, business rule violations).
         RuntimeError: for unexpected database errors.
     """
-    params = params or {}
-    logger.debug("call_sql_function: %s | params=%s", func_call, list(params.keys()))
     try:
-        result = await db.execute(text(func_call), params)
+        if isinstance(params, list):
+            logger.debug("call_sql_function: %s | mode=positional | param_count=%d", func_call, len(params))
+            conn = await db.connection()
+            result = await conn.exec_driver_sql(func_call, params)
+        else:
+            params = params or {}
+            logger.debug("call_sql_function: %s | mode=named | params=%s", func_call, list(params.keys()))
+            result = await db.execute(text(func_call), params)
         rows = result.fetchall()
         return [_clean_row(_row_to_dict(r)) for r in rows]
     except DBAPIError as exc:
@@ -104,7 +120,7 @@ async def call_sql_function(
 async def call_sql_function_one(
     db: AsyncSession,
     func_call: str,
-    params: Optional[dict] = None,
+    params: Optional[Union[dict, list]] = None,
 ) -> Optional[dict]:
     """Like call_sql_function but returns only the first row, or None."""
     rows = await call_sql_function(db, func_call, params)
