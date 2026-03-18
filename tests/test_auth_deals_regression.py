@@ -435,3 +435,18 @@ class TestDealCreateSQLSignature:
 
         assert resp.status_code == 200
         assert captured.get("params", {}).get("created_by_user_id") is None
+
+    def test_client_id_is_present_and_not_none_in_params(self):
+        """
+        Regression: client_id must be explicitly present and non-None in the
+        params dict passed to api_create_deal, matching the value submitted by
+        the frontend. This guards against the bug where client_id was saved as
+        NULL in the database.
+        """
+        submitted_client_id = 3  # value sent in _extract_sql_and_params payload
+        sql, params = self._extract_sql_and_params()
+        assert "client_id" in params, "client_id is missing from params dict"
+        assert params["client_id"] is not None, "client_id is None in params — deal would be saved with NULL client"
+        assert params["client_id"] == submitted_client_id, (
+            f"client_id should be {submitted_client_id} (as submitted), got {params['client_id']!r}"
+        )

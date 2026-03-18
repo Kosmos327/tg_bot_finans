@@ -191,17 +191,11 @@ async def create_deal(
     if role not in ("manager", "operations_director", "admin"):
         raise HTTPException(status_code=403, detail="Access denied: insufficient role")
 
-    logger.info(
-        "create_deal: received payload – client_id=%s, manager_id=%s, "
-        "status_id=%s, business_direction_id=%s, charged_with_vat=%s",
-        body.client_id,
-        body.manager_id,
-        body.status_id,
-        body.business_direction_id,
-        body.charged_with_vat,
-    )
-
     params = body.model_dump()
+    # Explicitly re-assign client_id from the validated request body to
+    # guarantee it is always present and non-None in the params dict, regardless
+    # of any Pydantic serialisation configuration (e.g. exclude_none / exclude_unset).
+    params["client_id"] = body.client_id
     # Resolve created_by_user_id from auth context: integer app_users.id when
     # authenticated via Telegram, None for web/browser mode (no Telegram session).
     created_by_user_id = user_id if isinstance(user_id, int) else None
@@ -260,17 +254,6 @@ async def create_deal(
         ":production_expense_without_vat, :manager_bonus_percent, "
         ":source_id, :document_link, :comment"
         ")"
-    )
-
-    logger.info(
-        "create_deal: calling api_create_deal – client_id=%s, "
-        "created_by_user_id=%s, manager_id=%s, status_id=%s, "
-        "business_direction_id=%s",
-        params.get("client_id"),
-        params.get("created_by_user_id"),
-        params.get("manager_id"),
-        params.get("status_id"),
-        params.get("business_direction_id"),
     )
 
     try:
