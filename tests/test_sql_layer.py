@@ -424,6 +424,106 @@ class TestDealCreateParameterOrder:
             "parameter order mismatch will cause FK violation at runtime"
         )
 
+    def test_sql_has_client_id_before_manager_id(self):
+        """
+        The SQL template in create_deal must have :client_id before :manager_id
+        so that asyncpg's positional mapping sends the correct value to
+        p_client_id (position 4) and p_manager_id (position 5) in the
+        PostgreSQL function signature.
+
+        Root cause of the NULL client_id bug: if :client_id was missing from
+        the SQL string, asyncpg would never bind a value for it, and PostgreSQL
+        would receive NULL for that positional argument, storing NULL in
+        deals.client_id regardless of what the frontend sent.
+        """
+        import inspect
+        from backend.routers.deals_sql import create_deal
+
+        source = inspect.getsource(create_deal)
+
+        client_pos = source.find(":client_id")
+        manager_pos = source.find(":manager_id")
+
+        assert client_pos != -1, (
+            "BUG: :client_id not found in create_deal source — "
+            "client_id will never be bound and deals.client_id will be NULL"
+        )
+        assert manager_pos != -1, ":manager_id not found in create_deal source"
+        assert client_pos < manager_pos, (
+            "BUG: :client_id appears AFTER :manager_id in the SQL — "
+            "asyncpg positional mapping will swap their values, sending "
+            "client_id as p_manager_id and manager_id as p_client_id."
+        )
+
+    @pytest.mark.asyncio
+    async def test_create_deal_endpoint_passes_client_id_to_sql(self):
+        """
+        Regression: POST /deals/create with client_id=7 must pass client_id=7
+        to call_sql_function_one.  Previously client_id was saved as NULL
+        because the SQL call template omitted the :client_id bind parameter.
+        """
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured: dict = {}
+
+        async def capture_params(db, sql, params):
+            captured["sql"] = sql
+            captured["params"] = dict(params)
+            return {"id": 99, "client_id": 7, "status": "Новая"}
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.deals_sql.call_sql_function_one",
+                new_callable=AsyncMock,
+                side_effect=capture_params,
+            ):
+                with patch(
+                    "backend.routers.deals_sql._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=(1, "admin", "Test Admin"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.post(
+                        "/deals/create",
+                        json={
+                            "status_id": 1,
+                            "business_direction_id": 2,
+                            "client_id": 7,
+                            "manager_id": 3,
+                            "charged_with_vat": 50000,
+                        },
+                        headers={"X-User-Role": "admin"},
+                    )
+                    assert resp.status_code == 200, (
+                        f"Expected 200, got {resp.status_code}: {resp.text}"
+                    )
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured, "call_sql_function_one was never called"
+
+        params = captured["params"]
+        assert "client_id" in params, (
+            "BUG: client_id is missing from the params dict passed to "
+            "call_sql_function_one — deals.client_id will be NULL"
+        )
+        assert params["client_id"] == 7, (
+            f"BUG: client_id should be 7 but got {params.get('client_id')!r} — "
+            "the client_id value was lost or corrupted before reaching the SQL layer"
+        )
+        sql = captured["sql"]
+        assert ":client_id" in sql, (
+            "BUG: :client_id bind parameter is missing from the SQL string — "
+            "asyncpg will not pass client_id to the PostgreSQL function, "
+            "causing deals.client_id to be saved as NULL"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Regression: billing/payment SQL signature fixes
