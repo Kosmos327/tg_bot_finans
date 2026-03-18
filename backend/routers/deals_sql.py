@@ -220,53 +220,50 @@ async def create_deal(
                     )
                 manager_id = mgr.id
 
-    # PARAMETER ORDER IS CRITICAL — positional $N placeholders map directly to
-    # asyncpg positional arguments.  The list below MUST match the PostgreSQL
-    # function signature of public.api_create_deal exactly:
-    #   $1  p_created_by_user_id           $2  p_status_id
-    #   $3  p_business_direction_id        $4  p_client_id
-    #   $5  p_manager_id                   $6  p_charged_with_vat
-    #   $7  p_vat_type_id                  $8  p_vat_rate
-    #   $9  p_paid                         $10 p_project_start_date
-    #   $11 p_project_end_date             $12 p_act_date
-    #   $13 p_variable_expense_1_without_vat
-    #   $14 p_variable_expense_2_without_vat
-    #   $15 p_production_expense_without_vat
-    #   $16 p_manager_bonus_percent        $17 p_source_id
-    #   $18 p_document_link               $19 p_comment
+    # Named parameters passed as a plain dict so that call_sql_function_one
+    # uses the text() / named-placeholder code path (never exec_driver_sql).
+    # Parameter order in the SQL call matches the PostgreSQL function signature
+    # of public.api_create_deal exactly:
+    #   p_created_by_user_id, p_status_id, p_business_direction_id, p_client_id,
+    #   p_manager_id, p_charged_with_vat, p_vat_type_id, p_vat_rate,
+    #   p_paid, p_project_start_date, p_project_end_date, p_act_date,
+    #   p_variable_expense_1_without_vat, p_variable_expense_2_without_vat,
+    #   p_production_expense_without_vat, p_manager_bonus_percent,
+    #   p_source_id, p_document_link, p_comment
     #
     # NOTE: p_charged_without_vat does NOT exist in the SQL function signature.
     sql = (
         "SELECT * FROM public.api_create_deal("
-        "$1, $2, $3, $4, $5, "
-        "$6, $7, $8, "
-        "$9, $10, $11, $12, "
-        "$13, $14, $15, $16, "
-        "$17, $18, $19"
+        ":created_by_user_id, :status_id, :business_direction_id, :client_id, :manager_id, "
+        ":charged_with_vat, :vat_type_id, :vat_rate, "
+        ":paid, :project_start_date, :project_end_date, :act_date, "
+        ":variable_expense_1_without_vat, :variable_expense_2_without_vat, "
+        ":production_expense_without_vat, :manager_bonus_percent, "
+        ":source_id, :document_link, :comment"
         ")"
     )
 
-    params = [
-        created_by_user_id,                      # $1  p_created_by_user_id
-        body.status_id,                           # $2  p_status_id
-        body.business_direction_id,               # $3  p_business_direction_id
-        body.client_id,                           # $4  p_client_id
-        manager_id,                               # $5  p_manager_id
-        body.charged_with_vat,                    # $6  p_charged_with_vat
-        body.vat_type_id,                         # $7  p_vat_type_id
-        body.vat_rate,                            # $8  p_vat_rate
-        body.paid,                                # $9  p_paid
-        body.project_start_date,                  # $10 p_project_start_date
-        body.project_end_date,                    # $11 p_project_end_date
-        body.act_date,                            # $12 p_act_date
-        body.variable_expense_1_without_vat,      # $13 p_variable_expense_1_without_vat
-        body.variable_expense_2_without_vat,      # $14 p_variable_expense_2_without_vat
-        body.production_expense_without_vat,      # $15 p_production_expense_without_vat
-        body.manager_bonus_percent,               # $16 p_manager_bonus_percent
-        body.source_id,                           # $17 p_source_id
-        body.document_link,                       # $18 p_document_link
-        body.comment,                             # $19 p_comment
-    ]
+    params = {
+        "created_by_user_id": created_by_user_id,
+        "status_id": body.status_id,
+        "business_direction_id": body.business_direction_id,
+        "client_id": body.client_id,
+        "manager_id": manager_id,
+        "charged_with_vat": body.charged_with_vat,
+        "vat_type_id": body.vat_type_id,
+        "vat_rate": body.vat_rate,
+        "paid": body.paid,
+        "project_start_date": body.project_start_date,
+        "project_end_date": body.project_end_date,
+        "act_date": body.act_date,
+        "variable_expense_1_without_vat": body.variable_expense_1_without_vat,
+        "variable_expense_2_without_vat": body.variable_expense_2_without_vat,
+        "production_expense_without_vat": body.production_expense_without_vat,
+        "manager_bonus_percent": body.manager_bonus_percent,
+        "source_id": body.source_id,
+        "document_link": body.document_link,
+        "comment": body.comment,
+    }
 
     try:
         result = await call_sql_function_one(db, sql, params)
