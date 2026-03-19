@@ -80,9 +80,21 @@ def _normalize_deal_contract(row: Dict[str, Any]) -> Dict[str, Any]:
     """Return a deal row with stable frontend contract aliases."""
     deal = dict(row)
 
-    client_value = deal.get("client") or deal.get("client_name")
-    manager_value = deal.get("manager") or deal.get("manager_name")
-    status_value = deal.get("status") or deal.get("status_name")
+    client_value = (
+        deal.get("client")
+        if deal.get("client") is not None
+        else deal.get("client_name")
+    )
+    manager_value = (
+        deal.get("manager")
+        if deal.get("manager") is not None
+        else deal.get("manager_name")
+    )
+    status_value = (
+        deal.get("status")
+        if deal.get("status") is not None
+        else deal.get("status_name")
+    )
 
     deal["client"] = client_value
     deal["client_name"] = client_value
