@@ -360,18 +360,11 @@ function populateSelects(data) {
   fillSelect('payment-direction-select', dirs);
   fillSelect('expense-direction-select', dirs);
 
-  // Billing warehouse dropdown – always populate from enriched warehouses.
-  // Array.isArray + length check is required because [] is truthy, so the
-  // plain `||` operator would return [] instead of FALLBACK_WAREHOUSES when
-  // the API responds with an empty array.
-  const warehouses =
-    Array.isArray(state.enrichedSettings?.warehouses) &&
-    state.enrichedSettings.warehouses.length > 0
-      ? state.enrichedSettings.warehouses
-      : FALLBACK_WAREHOUSES;
+  // Billing warehouse dropdown – populate from loaded settings.warehouses.
+  const warehouses = Array.isArray(data?.warehouses) ? data.warehouses : [];
   const warehousesForSelect = warehouses.map(w => ({
     id: w.id,
-    name: `${(w.code || '').toUpperCase()} — ${w.name}`,
+    name: w.name,
   }));
   console.log('[billing warehouse fill input]', warehousesForSelect);
   fillSelect('billing-warehouse', warehousesForSelect);
