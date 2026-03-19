@@ -366,11 +366,11 @@ function populateSelects(data) {
     ? state.enrichedSettings.warehouses
     : [];
   if (billingWarehouseSelect) {
-    const firstOption = billingWarehouseSelect.options[0];
+    const firstOption = billingWarehouseSelect.options[0]?.cloneNode(true);
     billingWarehouseSelect.innerHTML = '';
     if (firstOption) billingWarehouseSelect.appendChild(firstOption);
     warehousesForBilling.forEach(warehouse => {
-      if (warehouse && warehouse.id !== undefined && warehouse.id !== null && warehouse.name) {
+      if (warehouse && warehouse.id != null && warehouse.name) {
         const option = document.createElement('option');
         option.value = String(warehouse.id);
         option.textContent = warehouse.name;
