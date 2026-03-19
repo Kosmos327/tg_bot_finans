@@ -360,15 +360,26 @@ function populateSelects(data) {
   fillSelect('payment-direction-select', dirs);
   fillSelect('expense-direction-select', dirs);
 
-  // Billing warehouse dropdown – populate from loaded settings.warehouses.
-  const warehouses = Array.isArray(data?.warehouses) ? data.warehouses : [];
-  const warehousesForSelect = warehouses.map(w => ({
-    id: w.id,
-    name: w.name,
-  }));
-  console.log('[billing warehouse fill input]', warehousesForSelect);
-  fillSelect('billing-warehouse', warehousesForSelect);
-  console.log('[billing warehouse option count]', document.getElementById('billing-warehouse')?.options?.length);
+  // Billing warehouse dropdown – populate directly from normalized warehouses.
+  const billingWarehouseSelect = document.getElementById('billing-warehouse');
+  const warehousesForBilling = Array.isArray(state.enrichedSettings?.warehouses)
+    ? state.enrichedSettings.warehouses
+    : [];
+  if (billingWarehouseSelect) {
+    const firstOption = billingWarehouseSelect.options[0];
+    billingWarehouseSelect.innerHTML = '';
+    if (firstOption) billingWarehouseSelect.appendChild(firstOption);
+    warehousesForBilling.forEach(warehouse => {
+      if (warehouse && warehouse.id !== undefined && warehouse.id !== null && warehouse.name) {
+        const option = document.createElement('option');
+        option.value = String(warehouse.id);
+        option.textContent = warehouse.name;
+        option.dataset.name = warehouse.name;
+        billingWarehouseSelect.appendChild(option);
+      }
+    });
+  }
+  console.log('[billing warehouse option count]', billingWarehouseSelect?.options?.length);
 
   // Edit deal status dropdown
   fillSelect('edit-status', data.statuses || []);
