@@ -437,18 +437,12 @@ async def dashboard_summary(
     if role not in ("operations_director", "accounting", "admin"):
         raise HTTPException(status_code=403, detail="Access denied: insufficient role")
 
-    where_parts: list[str] = []
-    params: dict = {}
-    if month:
-        where_parts.append("month = :month")
-        params["month"] = month
-
     try:
         return await read_sql_view(
             db,
             "public.v_dashboard_summary",
-            where_clause=" AND ".join(where_parts),
-            params=params,
+            where_clause=None,
+            params=None,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

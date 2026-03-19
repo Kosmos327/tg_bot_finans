@@ -17,6 +17,7 @@ class MonthOperationRequest(BaseModel):
 
 class ArchiveMonthRequest(MonthOperationRequest):
     """POST /month/archive"""
+    notes: Optional[str] = None
 
 
 class CleanupMonthRequest(BaseModel):
@@ -31,4 +32,6 @@ class CloseMonthRequest(BaseModel):
 
     year: int
     month: int
+    notes: Optional[str] = None
     comment: Optional[str] = None
+    dry_run: bool = False

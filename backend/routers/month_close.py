@@ -83,6 +83,10 @@ def _require_month_close_role(role: str) -> None:
         )
 
 
+def _month_key(year: int, month: int) -> str:
+    return f"{year:04d}-{month:02d}"
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -96,7 +100,7 @@ async def archive_month(
     x_user_role: Optional[str] = Header(default=None),
 ) -> List[Dict[str, Any]]:
     """
-    Archive a month via public.archive_month(year, month, dry_run).
+    Archive a month via public.archive_month(month_key, started_by_user_id, notes, dry_run).
 
     dry_run=true runs the check without making changes.
     Accessible by: operations_director, admin.
@@ -106,8 +110,16 @@ async def archive_month(
         raise HTTPException(status_code=403, detail="Access denied: please login first")
     _require_month_close_role(role)
 
-    sql = "SELECT * FROM public.archive_month(:year, :month, :dry_run)"
-    params = {"year": body.year, "month": body.month, "dry_run": body.dry_run}
+    sql = (
+        "SELECT * FROM public.archive_month("
+        ":month_key, :started_by_user_id, :notes, :dry_run)"
+    )
+    params = {
+        "month_key": _month_key(body.year, body.month),
+        "started_by_user_id": int(user_id) if isinstance(user_id, int) else None,
+        "notes": body.notes,
+        "dry_run": body.dry_run,
+    }
 
     try:
         return await call_sql_function(db, sql, params)
@@ -155,7 +167,7 @@ async def close_month(
     x_user_role: Optional[str] = Header(default=None),
 ) -> List[Dict[str, Any]]:
     """
-    Close a month via public.close_month(year, month, comment).
+    Close a month via public.close_month(month_key, started_by_user_id, notes, dry_run).
 
     Accessible by: operations_director, admin.
     """
@@ -164,8 +176,16 @@ async def close_month(
         raise HTTPException(status_code=403, detail="Access denied: please login first")
     _require_month_close_role(role)
 
-    sql = "SELECT * FROM public.close_month(:year, :month, :comment)"
-    params = {"year": body.year, "month": body.month, "comment": body.comment}
+    sql = (
+        "SELECT * FROM public.close_month("
+        ":month_key, :started_by_user_id, :notes, :dry_run)"
+    )
+    params = {
+        "month_key": _month_key(body.year, body.month),
+        "started_by_user_id": int(user_id) if isinstance(user_id, int) else None,
+        "notes": body.notes if body.notes is not None else body.comment,
+        "dry_run": body.dry_run,
+    }
 
     try:
         return await call_sql_function(db, sql, params)
