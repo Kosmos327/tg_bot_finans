@@ -445,6 +445,51 @@ class TestDealCreateParameterOrder:
         assert "$6" not in sql, "$6 positional placeholder must NOT be in SQL (use :charged_with_vat)"
 
 
+class TestDealsResponseNormalization:
+    @pytest.mark.asyncio
+    async def test_list_deals_sets_client_from_client_name_when_client_missing(self):
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        client = TestClient(app, raise_server_exceptions=True)
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.deals_sql._resolve_user",
+                new_callable=AsyncMock,
+                return_value=(1, "admin", "Test Admin"),
+            ):
+                with patch(
+                    "backend.routers.deals_sql.read_sql_view",
+                    new_callable=AsyncMock,
+                    return_value=[
+                        {
+                            "id": 101,
+                            "deal_id": "DEAL-101",
+                            "client_name": "ООО Ромашка",
+                            "manager_name": "Иван",
+                            "status_name": "Новая",
+                        }
+                    ],
+                ):
+                    resp = client.get("/deals", headers={"X-User-Role": "admin"})
+                    assert resp.status_code == 200, (
+                        f"Expected 200, got {resp.status_code}: {resp.text}"
+                    )
+                    body = resp.json()
+                    assert isinstance(body, list)
+                    assert len(body) == 1
+                    assert body[0]["client"] == "ООО Ромашка"
+                    assert body[0]["client_name"] == "ООО Ромашка"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+
 # ---------------------------------------------------------------------------
 # Regression: billing/payment SQL signature fixes
 # All three pay/upsert SQL functions require p_updated_by_user_id as FIRST arg.
