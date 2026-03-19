@@ -105,6 +105,30 @@ def _get_caller_telegram_id(
     return None
 
 
+def _normalize_deal_row_contract(deal: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Ensure stable alias contract for deal display fields.
+
+    Keeps backward compatibility by returning both:
+      - client / client_name
+      - manager / manager_name
+      - status / status_name
+    """
+    def _ensure_alias_pair(short_key: str, name_key: str) -> None:
+        short_value = deal.get(short_key)
+        name_value = deal.get(name_key)
+
+        if short_value is None and name_value is not None:
+            deal[short_key] = name_value
+        elif name_value is None and short_value is not None:
+            deal[name_key] = short_value
+
+    _ensure_alias_pair("client", "client_name")
+    _ensure_alias_pair("manager", "manager_name")
+    _ensure_alias_pair("status", "status_name")
+    return deal
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -158,13 +182,14 @@ async def list_deals(
     where_clause = " AND ".join(where_parts)
 
     try:
-        return await read_sql_view(
+        deals = await read_sql_view(
             db,
             "public.v_api_deals",
             where_clause=where_clause,
             params=params,
             order_by="created_at DESC",
         )
+        return [_normalize_deal_row_contract(deal) for deal in deals]
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -362,7 +387,7 @@ async def get_deal(
     if not rows:
         raise HTTPException(status_code=404, detail="Deal not found")
 
-    deal = rows[0]
+    deal = _normalize_deal_row_contract(rows[0])
 
     # Managers can only view their own deals
     if role == "manager":
