@@ -860,3 +860,20 @@ class TestBillingUpdateByUserIdParameterOrder:
                     assert resp.status_code == 404
         finally:
             app.dependency_overrides.pop(get_db, None)
+
+
+class TestDashboardSummarySqlFilter:
+    """Regression tests for /dashboard/summary SQL query construction."""
+
+    def test_dashboard_summary_does_not_filter_by_month_for_v_dashboard_summary(self):
+        """Route must not inject `month = :month` for public.v_dashboard_summary."""
+        import inspect
+        from backend.routers.dashboard import dashboard_summary
+
+        source = inspect.getsource(dashboard_summary)
+
+        assert "public.v_dashboard_summary" in source
+        assert "month = :month" not in source, (
+            "dashboard_summary must not apply month filter to public.v_dashboard_summary "
+            "because the view has no month column"
+        )
