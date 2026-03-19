@@ -273,11 +273,11 @@ function normalizeSettings(data) {
       id: d.id,
       name: d.name,
     })),
-    warehouses: (data.warehouses || []).map(w => ({
-      id: w.id,
-      name: w.name,
-      code: w.code,
-    })),
+    warehouses: (data.warehouses || data.warehouse || []).map(w => ({
+      id: w?.id ?? w?.warehouse_id,
+      name: w?.name ?? w?.warehouse_name ?? '',
+      code: w?.code ?? w?.warehouse_code ?? '',
+    })).filter(w => w.id !== undefined && w.id !== null),
     expense_categories: data.expense_categories || [],
     vat_types: data.vat_types || [],
   };
