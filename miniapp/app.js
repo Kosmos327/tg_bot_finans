@@ -361,7 +361,7 @@ function populateSelects(data) {
   fillSelect('expense-direction-select', dirs);
 
   // Billing warehouse dropdown – populate from loaded settings.warehouses.
-  const warehouses = Array.isArray(data.warehouses) ? data.warehouses : [];
+  const warehouses = Array.isArray(data?.warehouses) ? data.warehouses : [];
   const warehousesForSelect = warehouses.map(w => ({
     id: w.id,
     name: w.name,
