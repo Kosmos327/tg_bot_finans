@@ -865,15 +865,57 @@ class TestBillingUpdateByUserIdParameterOrder:
 class TestDashboardSummarySqlFilter:
     """Regression tests for /dashboard/summary SQL query construction."""
 
-    def test_dashboard_summary_does_not_filter_by_month_for_v_dashboard_summary(self):
-        """Route must not inject `month = :month` for public.v_dashboard_summary."""
-        import inspect
-        from backend.routers.dashboard import dashboard_summary
+    @pytest.mark.asyncio
+    async def test_dashboard_summary_excludes_month_filter(self):
+        """
+        Route must not inject `month = :month` for public.v_dashboard_summary,
+        even when month query param is provided.
+        """
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
 
-        source = inspect.getsource(dashboard_summary)
+        captured: dict = {}
 
-        assert "public.v_dashboard_summary" in source
-        assert "month = :month" not in source, (
-            "dashboard_summary must not apply month filter to public.v_dashboard_summary "
-            "because the view has no month column"
+        async def capture_read_sql_view(db, view_name, where_clause="", params=None, order_by="", limit=None):
+            captured["view_name"] = view_name
+            captured["where_clause"] = where_clause
+            captured["params"] = params
+            return [{"kpi": "ok", "value": 1}]
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.dashboard.read_sql_view",
+                new_callable=AsyncMock,
+                side_effect=capture_read_sql_view,
+            ):
+                with patch(
+                    "backend.routers.dashboard._resolve_user_db",
+                    new_callable=AsyncMock,
+                    return_value=(1, "admin", "Admin User"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.get(
+                        "/dashboard/summary?month=2026-03",
+                        headers={"X-User-Role": "admin"},
+                    )
+                    assert resp.status_code == 200, (
+                        f"Expected 200, got {resp.status_code}: {resp.text}"
+                    )
+
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured["view_name"] == "public.v_dashboard_summary"
+        assert captured["where_clause"] == "", (
+            "dashboard_summary must not pass month filter in where_clause for "
+            "public.v_dashboard_summary"
+        )
+        assert captured["params"] == {}, (
+            "dashboard_summary must not pass month bind params for "
+            "public.v_dashboard_summary"
         )
