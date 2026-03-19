@@ -17,6 +17,7 @@ class MonthOperationRequest(BaseModel):
 
 class ArchiveMonthRequest(MonthOperationRequest):
     """POST /month/archive"""
+    notes: Optional[str] = None
 
 
 class CleanupMonthRequest(BaseModel):
@@ -31,4 +32,8 @@ class CloseMonthRequest(BaseModel):
 
     year: int
     month: int
+    # Preferred field name for SQL function p_notes
+    notes: Optional[str] = None
+    # Backward-compatible alias kept for existing Mini App payloads
     comment: Optional[str] = None
+    dry_run: bool = False

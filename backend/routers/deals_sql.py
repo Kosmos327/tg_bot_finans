@@ -76,6 +76,50 @@ async def _resolve_user(
     return None, NO_ACCESS_ROLE, ""
 
 
+def _normalize_deal_contract(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a deal row with stable frontend contract aliases."""
+    deal = dict(row)
+
+    client_value = (
+        deal.get("client")
+        if deal.get("client") is not None
+        else deal.get("client_name")
+    )
+    manager_value = (
+        deal.get("manager")
+        if deal.get("manager") is not None
+        else deal.get("manager_name")
+    )
+    status_value = (
+        deal.get("status")
+        if deal.get("status") is not None
+        else deal.get("status_name")
+    )
+
+    deal["client"] = client_value
+    deal["client_name"] = client_value
+    deal["manager"] = manager_value
+    deal["manager_name"] = manager_value
+    deal["status"] = status_value
+    deal["status_name"] = status_value
+
+    for key in (
+        "id",
+        "deal_id",
+        "client_id",
+        "manager_id",
+        "status_id",
+        "charged_with_vat",
+        "paid",
+        "project_start_date",
+        "project_end_date",
+        "act_date",
+    ):
+        deal.setdefault(key, None)
+
+    return deal
+
+
 def _get_caller_telegram_id(
     x_telegram_id: Optional[str],
     x_telegram_init_data: Optional[str] = None,
@@ -158,13 +202,14 @@ async def list_deals(
     where_clause = " AND ".join(where_parts)
 
     try:
-        return await read_sql_view(
+        rows = await read_sql_view(
             db,
             "public.v_api_deals",
             where_clause=where_clause,
             params=params,
             order_by="created_at DESC",
         )
+        return [_normalize_deal_contract(row) for row in rows]
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -362,7 +407,7 @@ async def get_deal(
     if not rows:
         raise HTTPException(status_code=404, detail="Deal not found")
 
-    deal = rows[0]
+    deal = _normalize_deal_contract(rows[0])
 
     # Managers can only view their own deals
     if role == "manager":

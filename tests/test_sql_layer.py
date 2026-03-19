@@ -826,6 +826,185 @@ class TestBillingUpdateByUserIdParameterOrder:
         finally:
             app.dependency_overrides.pop(get_db, None)
 
+
+class TestWebRegressionContracts:
+    @pytest.mark.asyncio
+    async def test_deals_list_normalizes_client_aliases(self):
+        """GET /deals must expose both client and client_name for UI compatibility."""
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        async def fake_read_sql_view(*args, **kwargs):
+            return [{
+                "id": 1,
+                "deal_id": "DEAL-000001",
+                "client_name": "ООО Ромашка",
+                "manager_name": "Иван",
+                "status_name": "Новая",
+                "charged_with_vat": 1000,
+                "paid": 0,
+            }]
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.deals_sql.read_sql_view",
+                new_callable=AsyncMock,
+                side_effect=fake_read_sql_view,
+            ):
+                with patch(
+                    "backend.routers.deals_sql._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=(1, "admin", "Admin"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.get("/deals", headers={"X-User-Role": "admin"})
+                    assert resp.status_code == 200, resp.text
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        rows = resp.json()
+        assert isinstance(rows, list) and rows
+        row = rows[0]
+        assert row["client"] == "ООО Ромашка"
+        assert row["client_name"] == "ООО Ромашка"
+        assert row["manager"] == "Иван"
+        assert row["manager_name"] == "Иван"
+        assert row["status"] == "Новая"
+        assert row["status_name"] == "Новая"
+
+    @pytest.mark.asyncio
+    async def test_dashboard_summary_does_not_apply_month_column_filter(self):
+        """GET /dashboard/summary should not emit WHERE month=:month for v_dashboard_summary."""
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured = {}
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        async def fake_read_sql_view(db, view_name, where_clause=None, params=None, **kwargs):
+            captured["view_name"] = view_name
+            captured["where_clause"] = where_clause
+            captured["params"] = params
+            return [{"total_revenue_with_vat": 0}]
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.dashboard.read_sql_view",
+                new_callable=AsyncMock,
+                side_effect=fake_read_sql_view,
+            ):
+                with patch(
+                    "backend.routers.dashboard._resolve_user_db",
+                    new_callable=AsyncMock,
+                    return_value=(1, "admin", "Admin"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.get("/dashboard/summary?month=2026-03", headers={"X-User-Role": "admin"})
+                    assert resp.status_code == 200, resp.text
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured["view_name"] == "public.v_dashboard_summary"
+        assert captured["where_clause"] in (None, "")
+        assert captured["params"] in (None, {})
+
+    @pytest.mark.asyncio
+    async def test_month_close_uses_month_key_sql_signature(self):
+        """POST /month/close must call close_month(month_key, user_id, notes, dry_run)."""
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured = {}
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        async def fake_call_sql_function(db, sql, params):
+            captured["sql"] = sql
+            captured["params"] = dict(params)
+            return [{"status": "ok"}]
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.month_close.call_sql_function",
+                new_callable=AsyncMock,
+                side_effect=fake_call_sql_function,
+            ):
+                with patch(
+                    "backend.routers.month_close._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=(77, "admin", "Admin"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.post(
+                        "/month/close",
+                        json={"year": 2026, "month": 3, "comment": "EOM"},
+                        headers={"X-User-Role": "admin"},
+                    )
+                    assert resp.status_code == 200, resp.text
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert "public.close_month(:month_key, :started_by_user_id, :notes, :dry_run)" in captured["sql"]
+        assert captured["params"]["month_key"] == "2026-03"
+        assert captured["params"]["started_by_user_id"] == 77
+        assert captured["params"]["notes"] == "EOM"
+        assert captured["params"]["dry_run"] is False
+
+    @pytest.mark.asyncio
+    async def test_settings_enriched_warehouses_contract(self):
+        """GET /settings/enriched must return warehouses with id/name/code."""
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        payload = {
+            "statuses": [],
+            "business_directions": [],
+            "vat_types": [],
+            "sources": [],
+            "clients": [],
+            "managers": [],
+            "expense_categories": [],
+            "warehouses": [
+                {"id": 1, "name": "Москва", "code": "MSK"},
+                {"id": 2, "name": "Новосибирск", "code": "NSK"},
+            ],
+        }
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.settings.settings_service.load_enriched_settings_pg",
+                new_callable=AsyncMock,
+                return_value=payload,
+            ):
+                client = TestClient(app, raise_server_exceptions=True)
+                resp = client.get("/settings/enriched")
+                assert resp.status_code == 200, resp.text
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        data = resp.json()
+        assert "warehouses" in data
+        assert data["warehouses"][0]["id"] == 1
+        assert data["warehouses"][0]["name"] == "Москва"
+        assert data["warehouses"][0]["code"] == "MSK"
+
     @pytest.mark.asyncio
     async def test_payment_mark_returns_404_when_sql_returns_no_result(self):
         """If api_pay_deal returns no result, endpoint should return HTTP 404."""
