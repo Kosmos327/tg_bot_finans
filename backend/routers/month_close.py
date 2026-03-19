@@ -83,6 +83,18 @@ def _require_month_close_role(role: str) -> None:
         )
 
 
+def _build_month_key(year: int, month: int) -> str:
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=422, detail="month must be between 1 and 12")
+    return f"{year:04d}-{month:02d}"
+
+
+def _require_started_by_user_id(started_by_user_id: Any) -> int:
+    if not isinstance(started_by_user_id, int):
+        raise HTTPException(status_code=403, detail="Access denied: user id is required")
+    return started_by_user_id
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -96,7 +108,7 @@ async def archive_month(
     x_user_role: Optional[str] = Header(default=None),
 ) -> List[Dict[str, Any]]:
     """
-    Archive a month via public.archive_month(year, month, dry_run).
+    Archive a month via public.archive_month(month_key, started_by_user_id, notes, dry_run).
 
     dry_run=true runs the check without making changes.
     Accessible by: operations_director, admin.
@@ -105,9 +117,16 @@ async def archive_month(
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
     _require_month_close_role(role)
+    started_by_user_id = _require_started_by_user_id(user_id)
 
-    sql = "SELECT * FROM public.archive_month(:year, :month, :dry_run)"
-    params = {"year": body.year, "month": body.month, "dry_run": body.dry_run}
+    month_key = _build_month_key(body.year, body.month)
+    sql = "SELECT * FROM public.archive_month(:month_key, :started_by_user_id, :notes, :dry_run)"
+    params = {
+        "month_key": month_key,
+        "started_by_user_id": started_by_user_id,
+        "notes": body.notes if body.notes is not None else body.comment,
+        "dry_run": body.dry_run,
+    }
 
     try:
         return await call_sql_function(db, sql, params)
@@ -155,7 +174,7 @@ async def close_month(
     x_user_role: Optional[str] = Header(default=None),
 ) -> List[Dict[str, Any]]:
     """
-    Close a month via public.close_month(year, month, comment).
+    Close a month via public.close_month(month_key, started_by_user_id, notes, dry_run).
 
     Accessible by: operations_director, admin.
     """
@@ -163,9 +182,16 @@ async def close_month(
     if role == NO_ACCESS_ROLE:
         raise HTTPException(status_code=403, detail="Access denied: please login first")
     _require_month_close_role(role)
+    started_by_user_id = _require_started_by_user_id(user_id)
 
-    sql = "SELECT * FROM public.close_month(:year, :month, :comment)"
-    params = {"year": body.year, "month": body.month, "comment": body.comment}
+    month_key = _build_month_key(body.year, body.month)
+    sql = "SELECT * FROM public.close_month(:month_key, :started_by_user_id, :notes, :dry_run)"
+    params = {
+        "month_key": month_key,
+        "started_by_user_id": started_by_user_id,
+        "notes": body.notes if body.notes is not None else body.comment,
+        "dry_run": body.dry_run,
+    }
 
     try:
         return await call_sql_function(db, sql, params)

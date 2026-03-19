@@ -860,3 +860,195 @@ class TestBillingUpdateByUserIdParameterOrder:
                     assert resp.status_code == 404
         finally:
             app.dependency_overrides.pop(get_db, None)
+
+
+# ---------------------------------------------------------------------------
+# Regression: month_close SQL signature (month_key, started_by_user_id, notes, dry_run)
+# ---------------------------------------------------------------------------
+
+class TestMonthCloseSqlSignature:
+    @pytest.mark.asyncio
+    async def test_archive_uses_month_key_and_started_by_user_id_and_notes(self):
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured: dict = {}
+
+        async def capture_params(db, sql, params):
+            captured["sql"] = sql
+            captured["params"] = dict(params)
+            return []
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.month_close.call_sql_function",
+                new_callable=AsyncMock,
+                side_effect=capture_params,
+            ):
+                with patch(
+                    "backend.routers.month_close._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=(77, "admin", "Admin"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.post(
+                        "/month/archive",
+                        json={"year": 2024, "month": 1, "comment": "archive note", "dry_run": True},
+                        headers={"X-User-Role": "admin"},
+                    )
+                    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured, "call_sql_function was never called"
+        sql = captured["sql"]
+        params = captured["params"]
+        assert "public.archive_month(:month_key, :started_by_user_id, :notes, :dry_run)" in sql
+        assert params["month_key"] == "2024-01"
+        assert params["started_by_user_id"] == 77
+        assert params["notes"] == "archive note"
+        assert params["dry_run"] is True
+        assert "year" not in params
+        assert "month" not in params
+
+    @pytest.mark.asyncio
+    async def test_close_uses_month_key_and_started_by_user_id_and_prefers_notes(self):
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured: dict = {}
+
+        async def capture_params(db, sql, params):
+            captured["sql"] = sql
+            captured["params"] = dict(params)
+            return []
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.month_close.call_sql_function",
+                new_callable=AsyncMock,
+                side_effect=capture_params,
+            ):
+                with patch(
+                    "backend.routers.month_close._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=(88, "operations_director", "Ops Dir"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.post(
+                        "/month/close",
+                        json={
+                            "year": 2024,
+                            "month": 12,
+                            "comment": "legacy comment",
+                            "notes": "new notes",
+                            "dry_run": False,
+                        },
+                        headers={"X-User-Role": "operations_director"},
+                    )
+                    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured, "call_sql_function was never called"
+        sql = captured["sql"]
+        params = captured["params"]
+        assert "public.close_month(:month_key, :started_by_user_id, :notes, :dry_run)" in sql
+        assert params["month_key"] == "2024-12"
+        assert params["started_by_user_id"] == 88
+        assert params["notes"] == "new notes"
+        assert params["dry_run"] is False
+        assert "year" not in params
+        assert "month" not in params
+
+    @pytest.mark.asyncio
+    async def test_close_maps_comment_to_notes_when_notes_absent(self):
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured: dict = {}
+
+        async def capture_params(db, sql, params):
+            captured["params"] = dict(params)
+            return []
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.month_close.call_sql_function",
+                new_callable=AsyncMock,
+                side_effect=capture_params,
+            ):
+                with patch(
+                    "backend.routers.month_close._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=(55, "admin", "Admin"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.post(
+                        "/month/close",
+                        json={"year": 2023, "month": 2, "comment": "fallback comment"},
+                        headers={"X-User-Role": "admin"},
+                    )
+                    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured["params"]["month_key"] == "2023-02"
+        assert captured["params"]["notes"] == "fallback comment"
+        assert captured["params"]["dry_run"] is False
+
+    @pytest.mark.asyncio
+    async def test_archive_passes_none_notes_when_comment_and_notes_absent(self):
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured: dict = {}
+
+        async def capture_params(db, sql, params):
+            captured["params"] = dict(params)
+            return []
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.month_close.call_sql_function",
+                new_callable=AsyncMock,
+                side_effect=capture_params,
+            ):
+                with patch(
+                    "backend.routers.month_close._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=(11, "admin", "Admin"),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.post(
+                        "/month/archive",
+                        json={"year": 2025, "month": 3},
+                        headers={"X-User-Role": "admin"},
+                    )
+                    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured["params"]["month_key"] == "2025-03"
+        assert captured["params"]["notes"] is None
+        assert captured["params"]["dry_run"] is False

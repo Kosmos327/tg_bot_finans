@@ -8,11 +8,17 @@ from pydantic import BaseModel
 
 
 class MonthOperationRequest(BaseModel):
-    """Base request for month operations (archive / cleanup / close)."""
+    """Base request for month operations (archive / cleanup / close).
+
+    `comment` is preserved for backward compatibility; `notes` is the new
+    canonical field for SQL functions and takes precedence when both are sent.
+    """
 
     year: int
     month: int  # 1..12
     dry_run: bool = False
+    comment: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class ArchiveMonthRequest(MonthOperationRequest):
@@ -26,9 +32,5 @@ class CleanupMonthRequest(BaseModel):
     month: int
 
 
-class CloseMonthRequest(BaseModel):
+class CloseMonthRequest(MonthOperationRequest):
     """POST /month/close"""
-
-    year: int
-    month: int
-    comment: Optional[str] = None
