@@ -1097,3 +1097,81 @@ class TestMonthCloseSqlSignature:
         assert captured["params"]["month_key"] == "2025-03"
         assert captured["params"]["notes"] is None
         assert captured["params"]["dry_run"] is False
+
+    @pytest.mark.asyncio
+    async def test_archive_web_mode_with_null_user_id(self):
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured: dict = {}
+
+        async def capture_params(db, sql, params):
+            captured["params"] = dict(params)
+            return []
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.month_close.call_sql_function",
+                new_callable=AsyncMock,
+                side_effect=capture_params,
+            ):
+                with patch(
+                    "backend.routers.month_close._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=("", "admin", ""),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.post(
+                        "/month/archive",
+                        json={"year": 2025, "month": 3},
+                        headers={"X-User-Role": "admin"},
+                    )
+                    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured["params"]["started_by_user_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_close_web_mode_with_null_user_id(self):
+        from fastapi.testclient import TestClient
+        from app.database.database import get_db
+        from backend.main import app
+
+        captured: dict = {}
+
+        async def capture_params(db, sql, params):
+            captured["params"] = dict(params)
+            return []
+
+        async def override_get_db():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with patch(
+                "backend.routers.month_close.call_sql_function",
+                new_callable=AsyncMock,
+                side_effect=capture_params,
+            ):
+                with patch(
+                    "backend.routers.month_close._resolve_user",
+                    new_callable=AsyncMock,
+                    return_value=("", "operations_director", ""),
+                ):
+                    client = TestClient(app, raise_server_exceptions=True)
+                    resp = client.post(
+                        "/month/close",
+                        json={"year": 2025, "month": 3},
+                        headers={"X-User-Role": "operations_director"},
+                    )
+                    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+        assert captured["params"]["started_by_user_id"] is None

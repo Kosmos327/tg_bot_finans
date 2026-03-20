@@ -89,10 +89,12 @@ def _build_month_key(year: int, month: int) -> str:
     return f"{year:04d}-{month:02d}"
 
 
-def _require_started_by_user_id(started_by_user_id: Any) -> int:
-    if not isinstance(started_by_user_id, int):
-        raise HTTPException(status_code=403, detail="Access denied: user id is required")
-    return started_by_user_id
+def _require_started_by_user_id(started_by_user_id: Any) -> Optional[int]:
+    if isinstance(started_by_user_id, int):
+        return started_by_user_id
+    if started_by_user_id in (None, ""):
+        return None
+    raise HTTPException(status_code=403, detail="Access denied: user id is required")
 
 
 # ---------------------------------------------------------------------------
