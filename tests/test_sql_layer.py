@@ -1099,7 +1099,7 @@ class TestMonthCloseSqlSignature:
         assert captured["params"]["dry_run"] is False
 
     @pytest.mark.asyncio
-    async def test_archive_allows_web_mode_role_only_with_null_started_by_user_id(self):
+    async def test_archive_web_mode_with_null_user_id(self):
         from fastapi.testclient import TestClient
         from app.database.database import get_db
         from backend.main import app
@@ -1138,7 +1138,7 @@ class TestMonthCloseSqlSignature:
         assert captured["params"]["started_by_user_id"] is None
 
     @pytest.mark.asyncio
-    async def test_close_allows_web_mode_role_only_with_null_started_by_user_id(self):
+    async def test_close_web_mode_with_null_user_id(self):
         from fastapi.testclient import TestClient
         from app.database.database import get_db
         from backend.main import app
