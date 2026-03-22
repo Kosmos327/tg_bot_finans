@@ -880,7 +880,9 @@ async function loadDeals() {
     // Optional client/status filters can be passed as query params.
 
     const deals = await apiFetch(`/deals${params.toString() ? '?' + params : ''}`);
-    state.deals = deals;
+    state.deals = Array.isArray(deals)
+      ? deals.map(normalizeDealRecord)
+      : [];
     renderDeals();
   } catch (err) {
     showToast(`Ошибка загрузки сделок: ${getErrorMessage(err)}`, 'error');
@@ -889,6 +891,19 @@ async function loadDeals() {
     state.isLoadingDeals = false;
     showDealsLoading(false);
   }
+}
+
+/**
+ * Normalizes backend/view deal payload field names for frontend compatibility.
+ * Keeps existing `deal.client` intact; maps `client_name` -> `client` only when needed.
+ */
+function normalizeDealRecord(deal) {
+  if (!deal || typeof deal !== 'object') return deal;
+  if (deal.client !== undefined && deal.client !== null && deal.client !== '') return deal;
+  if (deal.client_name !== undefined && deal.client_name !== null && deal.client_name !== '') {
+    return { ...deal, client: deal.client_name };
+  }
+  return deal;
 }
 
 function renderDeals() {
