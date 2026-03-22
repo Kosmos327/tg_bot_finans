@@ -283,6 +283,18 @@ function normalizeSettings(data) {
   };
 }
 
+/**
+ * Normalize deal payload field aliases for UI rendering compatibility.
+ * Preserves existing deal.client; falls back to deal.client_name when needed.
+ */
+function normalizeDeal(item) {
+  if (!item || typeof item !== 'object') return item;
+  return {
+    ...item,
+    client: item.client ?? item.client_name ?? item.client,
+  };
+}
+
 async function loadSettings() {
   // Prevent duplicate requests — return cached settings if already loaded.
   if (state.settings) return state.settings;
@@ -880,7 +892,7 @@ async function loadDeals() {
     // Optional client/status filters can be passed as query params.
 
     const deals = await apiFetch(`/deals${params.toString() ? '?' + params : ''}`);
-    state.deals = deals;
+    state.deals = (deals || []).map(normalizeDeal);
     renderDeals();
   } catch (err) {
     showToast(`Ошибка загрузки сделок: ${getErrorMessage(err)}`, 'error');
